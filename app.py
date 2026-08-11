@@ -625,7 +625,10 @@ def inicializar_estado():
         "eliminados_previa": [],
         "cuadro_actual": [],
         "ronda_eliminatoria_num": 1,
+        "partidos_ronda_actual": [],
+        "partidos_ronda_actual_num": -1,
         "campeon": None,
+        "liguilla_partido": None,
         "liguilla_campeon": None
     }
     for clave, valor in defaults.items():
@@ -862,6 +865,9 @@ def panel_configuracion():
         st.session_state.eliminados_previa = []
         st.session_state.cuadro_actual = []
         st.session_state.ronda_eliminatoria_num = 1
+        st.session_state.partidos_ronda_actual = []
+        st.session_state.partidos_ronda_actual_num = -1
+        st.session_state.liguilla_partido = None
         st.session_state.campeon = None
         st.session_state.liguilla_campeon = None
         st.session_state.etapa = "previa"
@@ -1142,14 +1148,21 @@ def panel_liguilla_final():
     c1.metric("🥇 1º", f"{primero['pareja'][0]}/{primero['pareja'][1]}")
     c2.metric("🥈 2º", f"{segundo['pareja'][0]}/{segundo['pareja'][1]}")
 
-    partido_final = {
-        "pareja_a": primero["pareja"],
-        "pareja_b": segundo["pareja"],
-        "sets_a": None,
-        "sets_b": None,
-        "juegos_a": None,
-        "juegos_b": None
-    }
+    # El partido se guarda en session_state para que sobreviva a
+    # los reruns que dispara el formulario de resultado; si se
+    # reconstruyera de cero en cada rerun, el resultado recién
+    # introducido se perdería antes de poder comprobarlo.
+    if st.session_state.liguilla_partido is None:
+        st.session_state.liguilla_partido = {
+            "pareja_a": primero["pareja"],
+            "pareja_b": segundo["pareja"],
+            "sets_a": None,
+            "sets_b": None,
+            "juegos_a": None,
+            "juegos_b": None
+        }
+    partido_final = st.session_state.liguilla_partido
+
     if st.session_state.liguilla_campeon is None:
         formulario_resultado(partido_final, key_prefix="liguilla_final")
         if partido_final["sets_a"] is not None:
@@ -1204,27 +1217,43 @@ def panel_eliminatoria():
             for posicion, pareja in enumerate(equipos, start=1):
                 st.write(f"{posicion}. {pareja[0]}/{pareja[1]}")
 
-    partidos_ronda = []
-    for i in range(numero_equipos // 2):
-        equipo_a = equipos[i]
-        equipo_b = equipos[numero_equipos - 1 - i]
-        pista = pistas[i % len(pistas)] if pistas else None
-        partidos_ronda.append({
-            "pareja_a": equipo_a,
-            "pareja_b": equipo_b,
-            "pista": pista,
-            "sets_a": None,
-            "sets_b": None,
-            "juegos_a": None,
-            "juegos_b": None
-        })
+    ronda_num = st.session_state.ronda_eliminatoria_num
+
+    # Los partidos de la ronda se guardan en session_state y solo
+    # se reconstruyen cuando cambia el número de ronda (o el
+    # número de equipos). Si se reconstruyeran en cada rerun,
+    # cualquier resultado recién guardado por el formulario se
+    # perdería antes de poder comprobar si la ronda está completa
+    # — que era exactamente el motivo de que la final no avanzara.
+    necesita_reconstruir = (
+        st.session_state.partidos_ronda_actual_num != ronda_num
+        or len(st.session_state.partidos_ronda_actual)
+        != numero_equipos // 2
+    )
+    if necesita_reconstruir:
+        partidos_ronda = []
+        for i in range(numero_equipos // 2):
+            equipo_a = equipos[i]
+            equipo_b = equipos[numero_equipos - 1 - i]
+            pista = pistas[i % len(pistas)] if pistas else None
+            partidos_ronda.append({
+                "pareja_a": equipo_a,
+                "pareja_b": equipo_b,
+                "pista": pista,
+                "sets_a": None,
+                "sets_b": None,
+                "juegos_a": None,
+                "juegos_b": None
+            })
+        st.session_state.partidos_ronda_actual = partidos_ronda
+        st.session_state.partidos_ronda_actual_num = ronda_num
+
+    partidos_ronda = st.session_state.partidos_ronda_actual
 
     for i, partido in enumerate(partidos_ronda):
         formulario_resultado(
             partido,
-            key_prefix=(
-                f"elim_r{st.session_state.ronda_eliminatoria_num}_{i}"
-            )
+            key_prefix=f"elim_r{ronda_num}_{i}"
         )
 
     todos_jugados = all(p["sets_a"] is not None for p in partidos_ronda)
@@ -1243,6 +1272,8 @@ def panel_eliminatoria():
             if st.button(etiqueta_siguiente, type="primary"):
                 st.session_state.cuadro_actual = ganadores
                 st.session_state.ronda_eliminatoria_num += 1
+                st.session_state.partidos_ronda_actual = []
+                st.session_state.partidos_ronda_actual_num = -1
                 st.rerun()
 
 
