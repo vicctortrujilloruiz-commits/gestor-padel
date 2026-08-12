@@ -22,6 +22,13 @@ STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
 
+# Códigos de acceso PRO válidos (p. ej. para clientes que ya han
+# pagado, promociones o pruebas internas).
+CODIGOS_PRO_VALIDOS = [
+    "PADELPRO-MASTER-2026",
+    "TORNEO-GRATIS-TEST"
+]
+
 
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     """
@@ -40,8 +47,13 @@ def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
 
 def mostrar_paywall():
     """
-    Dibuja el aviso de límite superado y los dos botones de pago
-    (HTML/CSS) en la barra lateral.
+    Dibuja el aviso de límite superado, los dos botones de pago
+    (HTML/CSS) y una cajita para introducir un código de acceso
+    PRO en la barra lateral.
+
+    Devuelve True si el usuario ha introducido un código válido
+    (desbloqueando así la generación del torneo), o False en caso
+    contrario.
     """
     st.sidebar.warning(
         "🔒 Has superado los límites del **Plan Gratuito** "
@@ -68,7 +80,7 @@ def mostrar_paywall():
                    font-size: 13px;
                    line-height: 1.3;
                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                ">
+               ">
                 🎟️ Pase 1 Torneo<br>2,99&euro;
             </a>
             """,
@@ -91,16 +103,34 @@ def mostrar_paywall():
                    font-size: 13px;
                    line-height: 1.3;
                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                ">
+               ">
                 ⭐ Licencia Pro<br>Ilimitada · 11,99&euro;
             </a>
             """,
             unsafe_allow_html=True
         )
 
+    codigo = st.sidebar.text_input(
+        "🔑 ¿Ya tienes un código de acceso PRO?",
+        value="",
+        key="codigo_acceso_pro"
+    ).strip()
+
+    if codigo:
+        if codigo in CODIGOS_PRO_VALIDOS:
+            st.sidebar.success("✅ Código válido. ¡Acceso PRO activado!")
+            return True
+        else:
+            st.sidebar.error("❌ Código no válido. Revísalo e inténtalo de nuevo.")
+            return False
+
+    return False
+
 
 # ==================================================================
 # 1. LÓGICA PURA DEL TORNEO
+# (idéntica a la versión de consola: nada de input()/print(),
+#  solo cálculo y estructuras de datos)
 # ==================================================================
 def pareja_disponible(
     idx,
@@ -153,6 +183,15 @@ def calcular_capacidad(
 
 
 def calcular_tamano_cuadro(num_parejas):
+    """
+    Devuelve la mayor potencia de 2 que no supera
+    el número de parejas.
+    Este tamaño ya NO se usa para generar BYEs ni
+    partidos de play-in: es simplemente cuántas parejas
+    (las mejor clasificadas) entrarán en la fase
+    eliminatoria. El resto queda fuera aplicando el
+    criterio de "mejor perdedor" sobre la clasificación.
+    """
     equipos = 1
     while equipos * 2 <= num_parejas:
         equipos *= 2
@@ -295,6 +334,9 @@ def calcular_formato_automatico(
         pistas,
         duracion
     )
+    # ==============================================================
+    # 2 PAREJAS
+    # ==============================================================
     if num_parejas == 2:
         return {
             "tipo": "eliminatoria",
@@ -303,6 +345,9 @@ def calcular_formato_automatico(
             "capacidad_total": capacidad_total,
             "partidos_eliminatoria": 1
         }
+    # ==============================================================
+    # 3-4 PAREJAS -> con suficiente tiempo hacemos liguilla.
+    # ==============================================================
     if num_parejas <= 4:
         partidos_liguilla = (
             num_parejas * (num_parejas - 1)
@@ -326,6 +371,9 @@ def calcular_formato_automatico(
                 "capacidad_total": capacidad_total,
                 "partidos_eliminatoria": 1
             }
+    # ==============================================================
+    # 5+ PAREJAS -> sistema "mejor perdedor", sin BYEs ni play-in.
+    # ==============================================================
     bracket = calcular_tamano_cuadro(
         num_parejas
     )
@@ -364,6 +412,12 @@ def asignar_horarios(
     duracion,
     restricciones
 ):
+    """
+    Idéntica en su lógica a la versión de consola.
+    Único cambio: en vez de hacer print() del aviso de partidos
+    sin hueco, se devuelve también la lista para que la capa de
+    Streamlit la muestre con st.warning().
+    """
     slots = obtener_slots(
         dias,
         duracion
@@ -531,6 +585,11 @@ def calcular_clasificacion(
             "juegos_perdidos": s["juegos_perdidos"],
             "diferencia_juegos": diferencia_juegos
         })
+    # ==============================================================
+    # ORDEN DE CLASIFICACIÓN: Victorias > Dif.Sets > Dif.Juegos >
+    # Juegos ganados (éste último actúa también como criterio de
+    # "mejor perdedor" en los desempates al filo del corte).
+    # ==============================================================
     clasificacion.sort(
         key=lambda x: (
             -x["victorias"],
@@ -546,6 +605,13 @@ def seleccionar_clasificados(
     clasificacion,
     tamano_cuadro
 ):
+    """
+    Sistema "mejor perdedor": sin BYEs ni play-in. Se toman
+    directamente las "tamano_cuadro" parejas mejor situadas.
+    Devuelve (clasificados, eliminados), ambos en orden de
+    clasificación (1º primero) para poder sembrar el cuadro
+    como 1º vs último, 2º vs penúltimo, etc.
+    """
     clasificados = list(
         clasificacion[:tamano_cuadro]
     )
@@ -558,6 +624,11 @@ def seleccionar_clasificados(
     )
 
 
+# ==================================================================
+# 2. VALIDACIÓN DE RESULTADOS DE UN SET (misma regla que la
+#    versión de consola, expuesta ahora como catálogo de
+#    combinaciones válidas para un selectbox de Streamlit).
+# ==================================================================
 def set_valido(a, b):
     if a == 6 and 0 <= b <= 4:
         return True
@@ -591,6 +662,14 @@ def opciones_set():
 
 
 def procesar_resultado_partido(set1, set2, set3):
+    """
+    Equivalente a pedir_resultado_padel() pero a partir de
+    los resultados ya introducidos en el formulario (strings
+    "a-b"). set3 puede ser None si no ha hecho falta.
+    Devuelve un dict con sets_a, sets_b, juegos_a, juegos_b y
+    el nombre del ganador ("a" o "b"), o None si falta el
+    tercer set siendo necesario.
+    """
     def parse(s):
         a, b = s.split("-")
         return int(a), int(b)
@@ -632,6 +711,9 @@ def procesar_resultado_partido(set1, set2, set3):
     }
 
 
+# ==================================================================
+# 3. ESTADO DE LA APLICACIÓN (st.session_state)
+# ==================================================================
 def inicializar_estado():
     defaults = {
         "etapa": "config",
@@ -663,6 +745,9 @@ def inicializar_estado():
 inicializar_estado()
 
 
+# ==================================================================
+# 4. BARRA LATERAL: CONFIGURACIÓN INICIAL DEL TORNEO
+# ==================================================================
 def panel_configuracion():
     st.sidebar.header("⚙️ Configuración del torneo")
     with st.sidebar.expander("👥 Parejas", expanded=True):
@@ -799,6 +884,9 @@ def panel_configuracion():
                 else:
                     restricciones[idx] = (desde, hasta)
 
+    # ==============================================================
+    # CONTROL DE PLAN (GRATUITO / PRO)
+    # ==============================================================
     restricciones_horarias = len(restricciones) > 0
     plan_gratuito = es_plan_gratuito(
         num_parejas,
@@ -809,16 +897,26 @@ def panel_configuracion():
     st.sidebar.divider()
 
     if not plan_gratuito:
-        mostrar_paywall()
-        generar = False
+        codigo_valido = mostrar_paywall()
+        if codigo_valido:
+            generar = st.sidebar.button(
+                "🚀 Generar torneo",
+                type="primary",
+                use_container_width=True
+            )
+        else:
+            generar = False
     else:
+        codigo_valido = False
         generar = st.sidebar.button(
             "🚀 Generar torneo",
             type="primary",
             use_container_width=True
         )
 
-    if generar and plan_gratuito:
+    acceso_permitido = plan_gratuito or codigo_valido
+
+    if generar and acceso_permitido:
         nombres_validos = [
             p for p in nombres if p[0] and p[1]
         ]
@@ -900,6 +998,9 @@ def panel_configuracion():
         st.rerun()
 
 
+# ==================================================================
+# 5. FORMATO AUTOMÁTICO (resumen visual)
+# ==================================================================
 def mostrar_formato():
     formato = st.session_state.formato
     parejas = st.session_state.parejas
@@ -952,7 +1053,16 @@ def mostrar_formato():
             )
 
 
+# ==================================================================
+# 6. FORMULARIO DE RESULTADO DE UN PARTIDO
+# ==================================================================
 def formulario_resultado(partido, key_prefix):
+    """
+    Sustituye a pedir_resultado_padel(). Dibuja un pequeño
+    formulario con los 3 sets (el 3º solo se usa si el partido
+    se decide en el tercero) y, al enviarlo, calcula y guarda
+    el resultado directamente en el diccionario `partido`.
+    """
     pareja_a = partido["pareja_a"]
     pareja_b = partido["pareja_b"]
     ya_jugado = partido["sets_a"] is not None
@@ -1011,6 +1121,9 @@ def formulario_resultado(partido, key_prefix):
                 st.rerun()
 
 
+# ==================================================================
+# 7. FASE PREVIA: CALENDARIO + RESULTADOS
+# ==================================================================
 def panel_fase_previa():
     st.header("🎾 Calendario del torneo")
     rondas_programadas = st.session_state.rondas_programadas
@@ -1074,6 +1187,9 @@ def panel_fase_previa():
         st.rerun()
 
 
+# ==================================================================
+# 8. CLASIFICACIÓN DE LA FASE PREVIA
+# ==================================================================
 def tabla_clasificacion(clasificacion):
     filas = []
     for posicion, c in enumerate(clasificacion, start=1):
@@ -1114,6 +1230,9 @@ def panel_clasificacion():
             )
             st.session_state.clasificados = clasificados
             st.session_state.eliminados_previa = eliminados
+            # Los equipos se mantienen en orden de clasificación
+            # (1º primero) para sembrar 1º vs último, 2º vs
+            # penúltimo, etc.
             st.session_state.cuadro_actual = [
                 c["pareja"] for c in clasificados
             ]
@@ -1122,6 +1241,9 @@ def panel_clasificacion():
         st.rerun()
 
 
+# ==================================================================
+# 9. LIGUILLA: FINAL ENTRE 1º Y 2º
+# ==================================================================
 def panel_liguilla_final():
     st.header("🏆 Final de la liguilla")
     clasificacion = st.session_state.clasificacion
@@ -1130,6 +1252,10 @@ def panel_liguilla_final():
     c1, c2 = st.columns(2)
     c1.metric("🥇 1º", f"{primero['pareja'][0]}/{primero['pareja'][1]}")
     c2.metric("🥈 2º", f"{segundo['pareja'][0]}/{segundo['pareja'][1]}")
+    # El partido se guarda en session_state para que sobreviva a
+    # los reruns que dispara el formulario de resultado; si se
+    # reconstruyera de cero en cada rerun, el resultado recién
+    # introducido se perdería antes de poder comprobarlo.
     if st.session_state.liguilla_partido is None:
         st.session_state.liguilla_partido = {
             "pareja_a": primero["pareja"],
@@ -1158,6 +1284,9 @@ def panel_liguilla_final():
         reiniciar_torneo()
 
 
+# ==================================================================
+# 10. FASE ELIMINATORIA (con sistema "mejor perdedor")
+# ==================================================================
 def panel_eliminatoria():
     st.header("🏆 Fase eliminatoria")
     if st.session_state.eliminados_previa:
@@ -1185,6 +1314,12 @@ def panel_eliminatoria():
             for posicion, pareja in enumerate(equipos, start=1):
                 st.write(f"{posicion}. {pareja[0]}/{pareja[1]}")
     ronda_num = st.session_state.ronda_eliminatoria_num
+    # Los partidos de la ronda se guardan en session_state y solo
+    # se reconstruyen cuando cambia el número de ronda (o el
+    # número de equipos). Si se reconstruyeran en cada rerun,
+    # cualquier resultado recién guardado por el formulario se
+    # perdería antes de poder comprobar si la ronda está completa
+    # — que era exactamente el motivo de que la final no avanzara.
     necesita_reconstruir = (
         st.session_state.partidos_ronda_actual_num != ronda_num
         or len(st.session_state.partidos_ronda_actual)
@@ -1233,6 +1368,9 @@ def panel_eliminatoria():
                 st.rerun()
 
 
+# ==================================================================
+# 11. CAMPEÓN
+# ==================================================================
 def panel_final():
     campeon = st.session_state.campeon
     st.balloons()
@@ -1241,6 +1379,9 @@ def panel_final():
         reiniciar_torneo()
 
 
+# ==================================================================
+# 12. UTILIDADES DE NAVEGACIÓN
+# ==================================================================
 def reiniciar_torneo():
     for clave in list(st.session_state.keys()):
         del st.session_state[clave]
@@ -1270,6 +1411,9 @@ def barra_progreso():
     )
 
 
+# ==================================================================
+# 13. APP PRINCIPAL
+# ==================================================================
 def main():
     st.title("🎾 Gestor de Torneos de Pádel")
     st.caption("Parejas fijas · Fase previa · Eliminatoria (mejor perdedor)")
