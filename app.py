@@ -15,6 +15,10 @@ LIMITE_PISTAS_GRATIS = 2
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
 def mostrar_paywall():
+    # Si ya se autenticó en la sesión, no pedir código de nuevo
+    if st.session_state.get('acceso_pro', False):
+        return True
+
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
@@ -687,6 +691,7 @@ def panel_configuracion():
         st.session_state.formato = calcular_formato_automatico(num_parejas, dias_ui, st.session_state.pistas, duracion)
         
         p_prev, p_par = seleccionar_partidos_previos(num_parejas, st.session_state.formato["partidos_previos"])
+        st.session_state.partidos_por_pareja = p_par # <-- AÑADIR ESTA LÍNEA
         rondas, s_h = asignar_horarios(agrupar_en_rondas(p_prev, num_parejas), nombres_validos, st.session_state.pistas, dias_ui, duracion, restricciones)
         
         st.session_state.rondas_programadas = rondas
@@ -1062,8 +1067,10 @@ def panel_final():
 # 12. UTILIDADES DE NAVEGACIÓN
 # ==================================================================
 def reiniciar_torneo():
-    for clave in list(st.session_state.keys()):
-        del st.session_state[clave]
+    acceso_guardado = st.session_state.get('acceso_pro', False)
+    st.session_state.clear()
+    st.session_state['acceso_pro'] = acceso_guardado
+    inicializar_estado()
     st.rerun()
 def barra_progreso():
     etapas = [
