@@ -997,6 +997,28 @@ def panel_configuracion():
         st.session_state.etapa = "previa"
         st.rerun()
 
+        # ... dentro de panel_configuracion, al final:
+    
+    acceso_pro = st.session_state.get("acceso_pro", False)
+    plan_gratuito = es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias)
+    
+    st.sidebar.divider()
+
+    if not plan_gratuito and not acceso_pro:
+        # Aquí mostramos el paywall y guardamos si el código fue válido
+        if mostrar_paywall():
+            st.rerun() # Esto limpia el mensaje amarillo al recargar
+        generar = False
+    else:
+        # Si ya es PRO o cumple plan gratuito, no mostramos paywall
+        generar = st.sidebar.button(
+            "🚀 Generar torneo",
+            type="primary",
+            use_container_width=True
+        )
+
+    # La lógica de generación sigue igual abajo
+
 
 # ==================================================================
 # 5. FORMATO AUTOMÁTICO (resumen visual)
