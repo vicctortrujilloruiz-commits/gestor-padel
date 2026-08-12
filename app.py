@@ -3,130 +3,33 @@ import math
 from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
-
+import verificador
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
-st.set_page_config(
-    page_title="🎾 Gestor de Torneos de Pádel",
-    page_icon="🎾",
-    layout="wide"
-)
-
-# ==================================================================
-# CONFIGURACIÓN DE MONETIZACIÓN (STRIPE)
-# ==================================================================
+st.set_page_config(page_title="🎾 Gestor de Torneos de Pádel", page_icon="🎾", layout="wide")
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
-
 LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
-
-# Códigos de acceso PRO válidos (p. ej. para clientes que ya han
-# pagado, promociones o pruebas internas).
-CODIGOS_PRO_VALIDOS = [
-    "PADELPRO-MASTER-2026",
-    "TORNEO-GRATIS-TEST"
-]
-
-
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
-    """
-    Devuelve True si la configuración actual entra dentro de los
-    límites del Plan Gratuito:
-      - num_parejas <= 8
-      - num_pistas  <= 2
-      - restricciones_horarias == False
-    """
-    return (
-        num_parejas <= LIMITE_PAREJAS_GRATIS
-        and num_pistas <= LIMITE_PISTAS_GRATIS
-        and not restricciones_horarias
-    )
-
-
+    return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
 def mostrar_paywall():
-    """
-    Dibuja el aviso de límite superado, los dos botones de pago
-    (HTML/CSS) y una cajita para introducir un código de acceso
-    PRO en la barra lateral.
-
-    Devuelve True si el usuario ha introducido un código válido
-    (desbloqueando así la generación del torneo), o False en caso
-    contrario.
-    """
-    st.sidebar.warning(
-        "🔒 Has superado los límites del **Plan Gratuito** "
-        f"(máx. {LIMITE_PAREJAS_GRATIS} parejas, "
-        f"{LIMITE_PISTAS_GRATIS} pistas y sin restricciones "
-        "horarias).\n\nElige una opción PRO para generar este torneo:"
-    )
-
+    st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
+    with col1: st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
+    with col2: st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
 
-    with col1:
-        st.markdown(
-            f"""
-            <a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank"
-               style="
-                   display: block;
-                   text-align: center;
-                   background-color: #2563eb;
-                   color: #ffffff;
-                   padding: 10px 6px;
-                   border-radius: 8px;
-                   text-decoration: none;
-                   font-weight: 600;
-                   font-size: 13px;
-                   line-height: 1.3;
-                   box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-               ">
-                🎟️ Pase 1 Torneo<br>2,99&euro;
-            </a>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with col2:
-        st.markdown(
-            f"""
-            <a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank"
-               style="
-                   display: block;
-                   text-align: center;
-                   background-color: #7c3aed;
-                   color: #ffffff;
-                   padding: 10px 6px;
-                   border-radius: 8px;
-                   text-decoration: none;
-                   font-weight: 600;
-                   font-size: 13px;
-                   line-height: 1.3;
-                   box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-               ">
-                ⭐ Licencia Pro<br>Ilimitada · 11,99&euro;
-            </a>
-            """,
-            unsafe_allow_html=True
-        )
-
-    codigo = st.sidebar.text_input(
-        "🔑 ¿Ya tienes un código de acceso PRO?",
-        value="",
-        key="codigo_acceso_pro"
-    ).strip()
-
+    codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
-        if codigo in CODIGOS_PRO_VALIDOS:
-            st.sidebar.success("✅ Código válido. ¡Acceso PRO activado!")
+        if verificador.es_pago_valido(codigo):
+            verificador.marcar_como_usado(codigo)
+            st.session_state['acceso_pro'] = True
+            st.sidebar.success("✅ ¡Acceso verificado!")
             return True
         else:
-            st.sidebar.error("❌ Código no válido. Revísalo e inténtalo de nuevo.")
-            return False
-
+            st.sidebar.error("❌ Código no válido o ya usado.")
     return False
-
-
 # ==================================================================
 # 1. LÓGICA PURA DEL TORNEO
 # (idéntica a la versión de consola: nada de input()/print(),
@@ -146,8 +49,6 @@ def pareja_disponible(
         and
         hora_fin_partido.time() <= disponible_hasta
     )
-
-
 def obtener_slots(
     dias,
     duracion
@@ -168,8 +69,6 @@ def obtener_slots(
                     minutes=duracion
                 )
     return slots
-
-
 def calcular_capacidad(
     dias,
     pistas,
@@ -180,8 +79,6 @@ def calcular_capacidad(
         duracion
     )
     return len(slots) * len(pistas)
-
-
 def calcular_tamano_cuadro(num_parejas):
     """
     Devuelve la mayor potencia de 2 que no supera
@@ -196,8 +93,6 @@ def calcular_tamano_cuadro(num_parejas):
     while equipos * 2 <= num_parejas:
         equipos *= 2
     return equipos
-
-
 def nombre_ronda(num_equipos):
     nombres = {
         64: "🎯 TREINTAIDOSAVOS DE FINAL",
@@ -211,8 +106,6 @@ def nombre_ronda(num_equipos):
         num_equipos,
         "🎯 FASE ELIMINATORIA"
     )
-
-
 def generar_todos_enfrentamientos(
     num_parejas
 ):
@@ -226,8 +119,6 @@ def generar_todos_enfrentamientos(
                 (i, j)
             )
     return partidos
-
-
 def seleccionar_partidos_previos(
     num_parejas,
     cantidad
@@ -284,8 +175,6 @@ def seleccionar_partidos_previos(
         seleccionados,
         partidos_por_pareja
     )
-
-
 def agrupar_en_rondas(
     partidos,
     num_parejas
@@ -321,8 +210,6 @@ def agrupar_en_rondas(
         })
         pendientes = restantes
     return rondas
-
-
 def calcular_formato_automatico(
     num_parejas,
     dias,
@@ -402,8 +289,6 @@ def calcular_formato_automatico(
         "partidos_eliminatoria":
             partidos_eliminatoria
     }
-
-
 def asignar_horarios(
     rondas,
     parejas,
@@ -517,8 +402,6 @@ def asignar_horarios(
         rondas_programadas,
         partidos_sin_hueco
     )
-
-
 def calcular_clasificacion(
     rondas_programadas,
     parejas
@@ -599,8 +482,6 @@ def calcular_clasificacion(
         )
     )
     return clasificacion
-
-
 def seleccionar_clasificados(
     clasificacion,
     tamano_cuadro
@@ -622,8 +503,6 @@ def seleccionar_clasificados(
         clasificados,
         eliminados
     )
-
-
 # ==================================================================
 # 2. VALIDACIÓN DE RESULTADOS DE UN SET (misma regla que la
 #    versión de consola, expuesta ahora como catálogo de
@@ -643,8 +522,6 @@ def set_valido(a, b):
     if b == 7 and a == 6:
         return True
     return False
-
-
 @st.cache_data
 def opciones_set():
     opciones = []
@@ -659,8 +536,6 @@ def opciones_set():
             s
         )
     )
-
-
 def procesar_resultado_partido(set1, set2, set3):
     """
     Equivalente a pedir_resultado_padel() pero a partir de
@@ -709,8 +584,6 @@ def procesar_resultado_partido(set1, set2, set3):
         "juegos_b": juegos_b,
         "ganador": ganador
     }
-
-
 # ==================================================================
 # 3. ESTADO DE LA APLICACIÓN (st.session_state)
 # ==================================================================
@@ -740,286 +613,86 @@ def inicializar_estado():
     for clave, valor in defaults.items():
         if clave not in st.session_state:
             st.session_state[clave] = valor
-
-
 inicializar_estado()
-
-
 # ==================================================================
 # 4. BARRA LATERAL: CONFIGURACIÓN INICIAL DEL TORNEO
 # ==================================================================
 def panel_configuracion():
     st.sidebar.header("⚙️ Configuración del torneo")
+    
+    # 1. EXPANDERS (Entrada de datos)
     with st.sidebar.expander("👥 Parejas", expanded=True):
-        num_parejas = st.number_input(
-            "¿Cuántas parejas van a participar?",
-            min_value=2,
-            value=max(2, len(st.session_state.parejas) or 4),
-            step=1,
-            key="num_parejas_input"
-        )
+        num_parejas = st.number_input("¿Cuántas parejas van a participar?", min_value=2, value=max(2, len(st.session_state.parejas) or 4), step=1, key="num_parejas_input")
         nombres = []
         for i in range(1, num_parejas + 1):
             col1, col2 = st.columns(2)
-            valor_1 = ""
-            valor_2 = ""
-            if i - 1 < len(st.session_state.parejas):
-                valor_1, valor_2 = st.session_state.parejas[i - 1]
-            with col1:
-                j1 = st.text_input(
-                    f"Pareja {i} · Jugador 1º",
-                    value=valor_1,
-                    key=f"pareja_{i}_j1"
-                )
-            with col2:
-                j2 = st.text_input(
-                    f"Pareja {i} · Jugador 2º",
-                    value=valor_2,
-                    key=f"pareja_{i}_j2"
-                )
+            v1 = st.session_state.parejas[i-1][0] if i-1 < len(st.session_state.parejas) else ""
+            v2 = st.session_state.parejas[i-1][1] if i-1 < len(st.session_state.parejas) else ""
+            with col1: j1 = st.text_input(f"Pareja {i} · Jugador 1º", value=v1, key=f"pareja_{i}_j1")
+            with col2: j2 = st.text_input(f"Pareja {i} · Jugador 2º", value=v2, key=f"pareja_{i}_j2")
             nombres.append((j1.strip(), j2.strip()))
+
     with st.sidebar.expander("📍 Pistas y duración"):
-        num_pistas = st.number_input(
-            "¿Cuántas pistas vas a usar?",
-            min_value=1,
-            value=max(1, len(st.session_state.pistas) or 2),
-            step=1
-        )
-        duracion = st.number_input(
-            "¿Cuántos minutos dura cada partido?",
-            min_value=1,
-            value=st.session_state.duracion,
-            step=5
-        )
+        num_pistas = st.number_input("¿Cuántas pistas vas a usar?", min_value=1, value=max(1, len(st.session_state.pistas) or 2), step=1)
+        duracion = st.number_input("¿Cuántos minutos dura cada partido?", min_value=1, value=st.session_state.duracion, step=5)
+
     with st.sidebar.expander("📅 Días y franjas horarias"):
-        num_dias = st.number_input(
-            "¿En cuántos días se jugará?",
-            min_value=1,
-            value=max(1, len(st.session_state.dias) or 1),
-            step=1
-        )
+        num_dias = st.number_input("¿En cuántos días se jugará?", min_value=1, value=max(1, len(st.session_state.dias) or 1), step=1)
         fecha_base = datetime(2024, 1, 1)
         dias_ui = []
         for i in range(1, num_dias + 1):
-            st.markdown(f"**Día {i}**")
-            etiqueta = st.text_input(
-                f"Nombre o fecha del día {i}",
-                value=f"Día {i}",
-                key=f"dia_{i}_etiqueta"
-            )
-            num_franjas = st.number_input(
-                f"¿Cuántas franjas horarias tiene el día {i}?",
-                min_value=1,
-                value=1,
-                step=1,
-                key=f"dia_{i}_num_franjas"
-            )
+            etiqueta = st.text_input(f"Nombre o fecha del día {i}", value=f"Día {i}", key=f"dia_{i}_etiqueta")
+            num_franjas = st.number_input(f"¿Cuántas franjas horarias tiene el día {i}?", min_value=1, value=1, step=1, key=f"dia_{i}_num_franjas")
             franjas = []
             for f in range(1, num_franjas + 1):
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    hora_inicio = st.time_input(
-                        f"Inicio franja {f} (día {i})",
-                        value=datetime(2024, 1, 1, 9, 0).time(),
-                        key=f"dia_{i}_franja_{f}_inicio"
-                    )
-                with fc2:
-                    hora_fin = st.time_input(
-                        f"Fin franja {f} (día {i})",
-                        value=datetime(2024, 1, 1, 14, 0).time(),
-                        key=f"dia_{i}_franja_{f}_fin"
-                    )
-                if hora_fin <= hora_inicio:
-                    st.warning(
-                        f"⚠️ Día {i}, franja {f}: la hora de fin "
-                        "debe ser posterior a la de inicio."
-                    )
-                dia_fecha = fecha_base + timedelta(days=i - 1)
-                franjas.append({
-                    "inicio": dia_fecha.replace(
-                        hour=hora_inicio.hour,
-                        minute=hora_inicio.minute
-                    ),
-                    "fin": dia_fecha.replace(
-                        hour=hora_fin.hour,
-                        minute=hora_fin.minute
-                    )
-                })
-            dias_ui.append({
-                "etiqueta": etiqueta,
-                "franjas": franjas
-            })
+                hi = st.time_input(f"Inicio franja {f} (día {i})", value=datetime(2024,1,1,9,0).time(), key=f"dia_{i}_f{f}_inicio")
+                hf = st.time_input(f"Fin franja {f} (día {i})", value=datetime(2024,1,1,14,0).time(), key=f"dia_{i}_f{f}_fin")
+                franjas.append({"inicio": datetime.combine(fecha_base + timedelta(days=i-1), hi), "fin": datetime.combine(fecha_base + timedelta(days=i-1), hf)})
+            dias_ui.append({"etiqueta": etiqueta, "franjas": franjas})
+
     with st.sidebar.expander("🕐 Restricciones horarias"):
-        st.caption(
-            "Marca solo las parejas que NO pueden jugar en "
-            "cualquier horario."
-        )
         restricciones = {}
         for idx, pareja in enumerate(nombres):
-            if not pareja[0] or not pareja[1]:
-                continue
-            tiene_restriccion = st.checkbox(
-                f"{pareja[0]}/{pareja[1]} tiene restricción",
-                key=f"restr_check_{idx}"
-            )
-            if tiene_restriccion:
+            if pareja[0] and pareja[1] and st.checkbox(f"{pareja[0]}/{pareja[1]} tiene restricción", key=f"restr_check_{idx}"):
                 rc1, rc2 = st.columns(2)
-                with rc1:
-                    desde = st.time_input(
-                        "Puede jugar a partir de",
-                        value=datetime(2024, 1, 1, 9, 0).time(),
-                        key=f"restr_desde_{idx}"
-                    )
-                with rc2:
-                    hasta = st.time_input(
-                        "Puede jugar hasta",
-                        value=datetime(2024, 1, 1, 22, 0).time(),
-                        key=f"restr_hasta_{idx}"
-                    )
-                if hasta <= desde:
-                    st.warning(
-                        f"⚠️ {pareja[0]}/{pareja[1]}: la hora "
-                        "'hasta' debe ser posterior a 'desde'."
-                    )
-                else:
-                    restricciones[idx] = (desde, hasta)
+                with rc1: desde = st.time_input("Desde", value=datetime(2024, 1, 1, 9, 0).time(), key=f"restr_desde_{idx}")
+                with rc2: hasta = st.time_input("Hasta", value=datetime(2024, 1, 1, 22, 0).time(), key=f"restr_hasta_{idx}")
+                restricciones[idx] = (desde, hasta)
 
-    # ==============================================================
-    # CONTROL DE PLAN (GRATUITO / PRO)
-    # ==============================================================
-    restricciones_horarias = len(restricciones) > 0
-    plan_gratuito = es_plan_gratuito(
-        num_parejas,
-        num_pistas,
-        restricciones_horarias
-    )
-
+    # 2. CONTROL DE ACCESO
     st.sidebar.divider()
+    acceso_pro = st.session_state.get("acceso_pro", False)
+    plan_gratuito = es_plan_gratuito(num_parejas, num_pistas, len(restricciones) > 0)
+    
+    permitido = plan_gratuito or acceso_pro
+    generar = False
 
-    if not plan_gratuito:
-        codigo_valido = mostrar_paywall()
-        if codigo_valido:
-            generar = st.sidebar.button(
-                "🚀 Generar torneo",
-                type="primary",
-                use_container_width=True
-            )
-        else:
-            generar = False
+    if not permitido:
+        if mostrar_paywall(): 
+            st.rerun() # Si se valida el código, recargamos para habilitar el botón
     else:
-        codigo_valido = False
-        generar = st.sidebar.button(
-            "🚀 Generar torneo",
-            type="primary",
-            use_container_width=True
-        )
+        generar = st.sidebar.button("🚀 Generar torneo", type="primary", use_container_width=True, key="btn_unico_generar")
 
-    acceso_permitido = plan_gratuito or codigo_valido
-
-    if generar and acceso_permitido:
-        nombres_validos = [
-            p for p in nombres if p[0] and p[1]
-        ]
-        nombres_limpios = {
-            n.lower()
-            for p in nombres_validos
-            for n in p
-        }
-        hay_duplicados = len(nombres_limpios) < len(
-            [n for p in nombres_validos for n in p]
-        )
+    # 3. EJECUCIÓN
+    if generar:
+        nombres_validos = [p for p in nombres if p[0] and p[1]]
         if len(nombres_validos) != num_parejas:
-            st.sidebar.error(
-                "⚠️ Completa el nombre de los dos jugadores "
-                "de cada pareja."
-            )
-            return
-        if hay_duplicados:
-            st.sidebar.error(
-                "⚠️ Hay nombres de jugadores repetidos. "
-                "Usa nombres distintos."
-            )
-            return
-        if not dias_ui or not all(d["franjas"] for d in dias_ui):
-            st.sidebar.error(
-                "⚠️ Revisa los días y franjas horarias."
-            )
-            return
+            st.sidebar.error("⚠️ Completa los nombres de todas las parejas."); return
+            
         st.session_state.parejas = nombres_validos
         st.session_state.restricciones = restricciones
-        st.session_state.pistas = [
-            f"Pista {i}" for i in range(1, num_pistas + 1)
-        ]
+        st.session_state.pistas = [f"Pista {i}" for i in range(1, num_pistas + 1)]
         st.session_state.dias = dias_ui
         st.session_state.duracion = duracion
-        formato = calcular_formato_automatico(
-            len(nombres_validos),
-            dias_ui,
-            st.session_state.pistas,
-            duracion
-        )
-        (
-            partidos_previos,
-            partidos_por_pareja
-        ) = seleccionar_partidos_previos(
-            len(nombres_validos),
-            formato["partidos_previos"]
-        )
-        rondas = agrupar_en_rondas(
-            partidos_previos,
-            len(nombres_validos)
-        )
-        (
-            rondas_programadas,
-            partidos_sin_hueco
-        ) = asignar_horarios(
-            rondas,
-            nombres_validos,
-            st.session_state.pistas,
-            dias_ui,
-            duracion,
-            restricciones
-        )
-        st.session_state.formato = formato
-        st.session_state.partidos_por_pareja = partidos_por_pareja
-        st.session_state.rondas_programadas = rondas_programadas
-        st.session_state.partidos_sin_hueco = partidos_sin_hueco
-        st.session_state.clasificacion = []
-        st.session_state.clasificados = []
-        st.session_state.eliminados_previa = []
-        st.session_state.cuadro_actual = []
-        st.session_state.ronda_eliminatoria_num = 1
-        st.session_state.partidos_ronda_actual = []
-        st.session_state.partidos_ronda_actual_num = -1
-        st.session_state.liguilla_partido = None
-        st.session_state.campeon = None
-        st.session_state.liguilla_campeon = None
+        st.session_state.formato = calcular_formato_automatico(num_parejas, dias_ui, st.session_state.pistas, duracion)
+        
+        p_prev, p_par = seleccionar_partidos_previos(num_parejas, st.session_state.formato["partidos_previos"])
+        rondas, s_h = asignar_horarios(agrupar_en_rondas(p_prev, num_parejas), nombres_validos, st.session_state.pistas, dias_ui, duracion, restricciones)
+        
+        st.session_state.rondas_programadas = rondas
+        st.session_state.partidos_sin_hueco = s_h
         st.session_state.etapa = "previa"
         st.rerun()
-
-        # ... dentro de panel_configuracion, al final:
-    
-    acceso_pro = st.session_state.get("acceso_pro", False)
-    plan_gratuito = es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias)
-    
-    st.sidebar.divider()
-
-    if not plan_gratuito and not acceso_pro:
-        # Aquí mostramos el paywall y guardamos si el código fue válido
-        if mostrar_paywall():
-            st.rerun() # Esto limpia el mensaje amarillo al recargar
-        generar = False
-    else:
-        # Si ya es PRO o cumple plan gratuito, no mostramos paywall
-        generar = st.sidebar.button(
-            "🚀 Generar torneo",
-            type="primary",
-            use_container_width=True
-        )
-
-    # La lógica de generación sigue igual abajo
-
-
 # ==================================================================
 # 5. FORMATO AUTOMÁTICO (resumen visual)
 # ==================================================================
@@ -1073,8 +746,6 @@ def mostrar_formato():
                 f"- Ronda {numero_ronda}: {pa[0]}/{pa[1]} vs "
                 f"{pb[0]}/{pb[1]}"
             )
-
-
 # ==================================================================
 # 6. FORMULARIO DE RESULTADO DE UN PARTIDO
 # ==================================================================
@@ -1141,8 +812,6 @@ def formulario_resultado(partido, key_prefix):
                     "juegos)"
                 )
                 st.rerun()
-
-
 # ==================================================================
 # 7. FASE PREVIA: CALENDARIO + RESULTADOS
 # ==================================================================
@@ -1207,8 +876,6 @@ def panel_fase_previa():
         )
         st.session_state.etapa = "clasificacion"
         st.rerun()
-
-
 # ==================================================================
 # 8. CLASIFICACIÓN DE LA FASE PREVIA
 # ==================================================================
@@ -1227,8 +894,6 @@ def tabla_clasificacion(clasificacion):
             "Dif.J": c["diferencia_juegos"]
         })
     return pd.DataFrame(filas)
-
-
 def panel_clasificacion():
     st.header("📊 Clasificación fase previa")
     clasificacion = st.session_state.clasificacion
@@ -1261,8 +926,6 @@ def panel_clasificacion():
             st.session_state.ronda_eliminatoria_num = 1
             st.session_state.etapa = "eliminatoria"
         st.rerun()
-
-
 # ==================================================================
 # 9. LIGUILLA: FINAL ENTRE 1º Y 2º
 # ==================================================================
@@ -1304,8 +967,6 @@ def panel_liguilla_final():
         st.success(f"🏆🏆🏆 CAMPEONES: {campeon[0]}/{campeon[1]} 🏆🏆🏆")
     if st.button("🔄 Empezar un torneo nuevo"):
         reiniciar_torneo()
-
-
 # ==================================================================
 # 10. FASE ELIMINATORIA (con sistema "mejor perdedor")
 # ==================================================================
@@ -1388,8 +1049,6 @@ def panel_eliminatoria():
                 st.session_state.partidos_ronda_actual = []
                 st.session_state.partidos_ronda_actual_num = -1
                 st.rerun()
-
-
 # ==================================================================
 # 11. CAMPEÓN
 # ==================================================================
@@ -1399,8 +1058,6 @@ def panel_final():
     st.success(f"🏆🏆🏆 CAMPEONES: {campeon[0]}/{campeon[1]} 🏆🏆🏆")
     if st.button("🔄 Empezar un torneo nuevo"):
         reiniciar_torneo()
-
-
 # ==================================================================
 # 12. UTILIDADES DE NAVEGACIÓN
 # ==================================================================
@@ -1408,8 +1065,6 @@ def reiniciar_torneo():
     for clave in list(st.session_state.keys()):
         del st.session_state[clave]
     st.rerun()
-
-
 def barra_progreso():
     etapas = [
         ("config", "1️⃣ Configurar"),
@@ -1431,8 +1086,6 @@ def barra_progreso():
             for clave, texto in etapas
         )
     )
-
-
 # ==================================================================
 # 13. APP PRINCIPAL
 # ==================================================================
@@ -1467,7 +1120,5 @@ def main():
         panel_eliminatoria()
     elif st.session_state.etapa == "final":
         panel_final()
-
-
 if __name__ == "__main__":
     main()
