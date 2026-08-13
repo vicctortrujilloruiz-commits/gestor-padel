@@ -27,18 +27,14 @@ def mostrar_paywall():
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
         if verificador.es_pago_valido(codigo):
-            verificador.marcar_como_usado(codigo)
+            # NO LO MARCAMOS COMO USADO AQUÍ, SOLO LO GUARDAMOS
+            st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
-            st.sidebar.success("✅ ¡Acceso verificado!")
+            st.sidebar.success("✅ ¡Acceso verificado! Ya puedes generar el torneo.")
             return True
         else:
             st.sidebar.error("❌ Código no válido o ya usado.")
     return False
-# ==================================================================
-# 1. LÓGICA PURA DEL TORNEO
-# (idéntica a la versión de consola: nada de input()/print(),
-#  solo cálculo y estructuras de datos)
-# ==================================================================
 def pareja_disponible(
     idx,
     hora_inicio_partido,
@@ -678,6 +674,7 @@ def panel_configuracion():
         generar = st.sidebar.button("🚀 Generar torneo", type="primary", use_container_width=True, key="btn_unico_generar")
 
     # 3. EJECUCIÓN
+    # 3. EJECUCIÓN
     if generar:
         nombres_validos = [p for p in nombres if p[0] and p[1]]
         if len(nombres_validos) != num_parejas:
@@ -691,12 +688,20 @@ def panel_configuracion():
         st.session_state.formato = calcular_formato_automatico(num_parejas, dias_ui, st.session_state.pistas, duracion)
         
         p_prev, p_par = seleccionar_partidos_previos(num_parejas, st.session_state.formato["partidos_previos"])
-        st.session_state.partidos_por_pareja = p_par # <-- AÑADIR ESTA LÍNEA
+        st.session_state.partidos_por_pareja = p_par 
         rondas, s_h = asignar_horarios(agrupar_en_rondas(p_prev, num_parejas), nombres_validos, st.session_state.pistas, dias_ui, duracion, restricciones)
         
         st.session_state.rondas_programadas = rondas
         st.session_state.partidos_sin_hueco = s_h
         st.session_state.etapa = "previa"
+        
+        # --- NUEVO: AHORA SÍ QUEMAMOS EL CÓDIGO EN STRIPE ---
+        codigo = st.session_state.get('codigo_verificado')
+        if codigo:
+            verificador.marcar_como_usado(codigo)
+            # Limpiamos el código para no volver a llamarlo accidentalmente
+            st.session_state['codigo_verificado'] = None
+            
         st.rerun()
 # ==================================================================
 # 5. FORMATO AUTOMÁTICO (resumen visual)
