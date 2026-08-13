@@ -103,3 +103,22 @@ def es_pago_valido(codigo_pago: str) -> bool:
 def marcar_como_usado(codigo_pago: str):
     """Función de compatibilidad por si se invoca desde app.py."""
     pass
+
+def es_licencia_pro(codigo_pago: str) -> bool:
+    """
+    Comprueba si el código corresponde a la licencia PRO ilimitada (11,99 €).
+    """
+    codigo_pago = codigo_pago.strip()
+    if not codigo_pago:
+        return False
+    try:
+        stripe.api_key = STRIPE_SECRET_KEY
+        if codigo_pago.startswith("pi_"):
+            intent = stripe.PaymentIntent.retrieve(codigo_pago)
+            return intent.amount in [1199, 1200]
+        elif codigo_pago.startswith("ch_"):
+            charge = stripe.Charge.retrieve(codigo_pago)
+            return charge.amount in [1199, 1200]
+    except Exception:
+        pass
+    return False

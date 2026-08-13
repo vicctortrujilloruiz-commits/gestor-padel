@@ -14,23 +14,45 @@ LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
+from streamlit_cookies_controller import CookieController
+
+# Inicializar el controlador de cookies
+cookies = CookieController()
+
 def mostrar_paywall():
-    # Si ya se autenticó en la sesión, no pedir código de nuevo
+    # 1. Si ya tiene acceso concedido en esta sesión
     if st.session_state.get('acceso_pro', False):
         return True
 
+    # 2. Comprobar si existe una cookie guardada con un código PRO (11,99 €)
+    codigo_cookie = cookies.get('codigo_pro_padel')
+    if codigo_cookie:
+        # Validar si el código de la cookie sigue siendo un pago PRO válido
+        if verificador.es_pago_valido(codigo_cookie):
+            st.session_state['codigo_verificado'] = codigo_cookie
+            st.session_state['acceso_pro'] = True
+            st.sidebar.success("⭐ Acceso PRO restaurado automáticamente.")
+            return True
+
+    # 3. Si no hay cookie o no es válida, mostrar el bloqueo (Paywall)
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
-    with col1: st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
-    with col2: st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
+    with col1: 
+        st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
+    with col2: 
+        st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
 
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
         if verificador.es_pago_valido(codigo):
-            # NO LO MARCAMOS COMO USADO AQUÍ, SOLO LO GUARDAMOS
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
-            st.sidebar.success("✅ ¡Acceso verificado! Ya puedes generar el torneo.")
+            
+            # Si es un código PRO de 11,99 €, guardamos la cookie para que recuerde la sesión al recargar
+            if verificador.es_licencia_pro(codigo):
+                cookies.set('codigo_pro_padel', codigo, max_age=86400*30) # Se guarda durante 30 días
+                
+            st.sidebar.success("✅ ¡Acceso verificado!")
             return True
         else:
             st.sidebar.error("❌ Código no válido o ya usado.")
@@ -695,7 +717,7 @@ def panel_configuracion():
         st.session_state.partidos_sin_hueco = s_h
         st.session_state.etapa = "previa"
         
-        # --- NUEVO: AHORA SÍ QUEMAMOS EL CÓDIGO EN STRIPE ---
+        # --- NUEVO: A5HORA SÍ QUEMAMOS EL CÓDIGO EN STRIPE ---
         codigo = st.session_state.get('codigo_verificado')
         if codigo:
             verificador.marcar_como_usado(codigo)
