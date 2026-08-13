@@ -5,38 +5,30 @@ from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import verificador
-
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
 st.set_page_config(page_title="🎾 Gestor de Torneos de Pádel", page_icon="🎾", layout="wide")
-
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
-
 LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
-
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
-
 def obtener_dispositivo_id():
     """Genera un ID único para la sesión actual."""
     if 'padel_device_id' not in st.session_state:
         st.session_state['padel_device_id'] = str(uuid.uuid4())
     return st.session_state['padel_device_id']
-
 def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
         return True
-
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
         st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
     with col2: 
         st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
-
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
         if verificador.es_pago_valido(codigo):
@@ -59,31 +51,36 @@ def pareja_disponible(
     empieza en `dia_partido` entre `hora_inicio_partido` y
     `hora_fin_partido`.
 
-    `restricciones[idx]` es un dict con:
+    `restricciones[idx]` es ahora una LISTA de dicts (una pareja
+    puede tener varias restricciones, en distintos días o incluso
+    varias en el mismo día). Cada dict tiene:
       - "dia": etiqueta de un día concreto (ej. "Día 2") o
         "Todos" si la restricción aplica a todos los días.
       - "desde" / "hasta": franja horaria en la que la pareja
         NO puede jugar ese día (hora de bloqueo, no de
         disponibilidad).
 
-    Si la restricción no aplica a `dia_partido` (porque es de
-    otro día distinto y no es "Todos"), la pareja está
-    disponible sin más comprobaciones.
+    La pareja NO está disponible si CUALQUIERA de sus
+    restricciones se solapa con el partido. Si ninguna
+    restricción aplica o ninguna solapa, está disponible.
     """
     if idx not in restricciones:
         return True
-    restriccion = restricciones[idx]
-    dia_restringido = restriccion["dia"]
-    if dia_restringido != "Todos" and dia_restringido != dia_partido:
-        return True
-    bloqueado_desde = restriccion["desde"]
-    bloqueado_hasta = restriccion["hasta"]
-    hay_solape = (
-        hora_inicio_partido.time() < bloqueado_hasta
-        and
-        hora_fin_partido.time() > bloqueado_desde
-    )
-    return not hay_solape
+    lista_restricciones = restricciones[idx]
+    for restriccion in lista_restricciones:
+        dia_restringido = restriccion["dia"]
+        if dia_restringido != "Todos" and dia_restringido != dia_partido:
+            continue
+        bloqueado_desde = restriccion["desde"]
+        bloqueado_hasta = restriccion["hasta"]
+        hay_solape = (
+            hora_inicio_partido.time() < bloqueado_hasta
+            and
+            hora_fin_partido.time() > bloqueado_desde
+        )
+        if hay_solape:
+            return False
+    return True
 def obtener_slots(
     dias,
     duracion
@@ -668,11 +665,9 @@ def panel_configuracion():
             with col1: j1 = st.text_input(f"Pareja {i} · Jugador 1º", value=v1, key=f"pareja_{i}_j1")
             with col2: j2 = st.text_input(f"Pareja {i} · Jugador 2º", value=v2, key=f"pareja_{i}_j2")
             nombres.append((j1.strip(), j2.strip()))
-
     with st.sidebar.expander("📍 Pistas y duración"):
         num_pistas = st.number_input("¿Cuántas pistas vas a usar?", min_value=1, value=max(1, len(st.session_state.pistas) or 2), step=1)
         duracion = st.number_input("¿Cuántos minutos dura cada partido?", min_value=1, value=st.session_state.duracion, step=5)
-
     with st.sidebar.expander("📅 Días y franjas horarias"):
         num_dias = st.number_input("¿En cuántos días se jugará?", min_value=1, value=max(1, len(st.session_state.dias) or 1), step=1)
         fecha_base = datetime(2024, 1, 1)
@@ -686,26 +681,60 @@ def panel_configuracion():
                 hf = st.time_input(f"Fin franja {f} (día {i})", value=datetime(2024,1,1,14,0).time(), key=f"dia_{i}_f{f}_fin")
                 franjas.append({"inicio": datetime.combine(fecha_base + timedelta(days=i-1), hi), "fin": datetime.combine(fecha_base + timedelta(days=i-1), hf)})
             dias_ui.append({"etiqueta": etiqueta, "franjas": franjas})
-
+    # ==============================================================
+    # RESTRICCIONES HORARIAS: ahora cada pareja puede tener
+    # MÚLTIPLES restricciones (distintos días y/o distintas franjas).
+    # `restricciones[idx]` pasa a ser una LISTA de dicts en vez de
+    # un único dict.
+    # ==============================================================
     with st.sidebar.expander("🕐 Restricciones horarias"):
         restricciones = {}
         opciones_dias_restriccion = ["Todos"] + [d["etiqueta"] for d in dias_ui]
         for idx, pareja in enumerate(nombres):
-            if pareja[0] and pareja[1] and st.checkbox(f"{pareja[0]}/{pareja[1]} tiene restricción", key=f"restr_check_{idx}"):
+            if not (pareja[0] and pareja[1]):
+                continue
+            tiene_restriccion = st.checkbox(
+                f"{pareja[0]}/{pareja[1]} tiene restricción",
+                key=f"restr_check_{idx}"
+            )
+            if not tiene_restriccion:
+                continue
+            num_restricciones = st.number_input(
+                f"¿Cuántas restricciones tiene {pareja[0]}/{pareja[1]}?",
+                min_value=1,
+                value=1,
+                step=1,
+                key=f"restr_num_{idx}"
+            )
+            lista_restricciones = []
+            for r in range(1, num_restricciones + 1):
+                st.markdown(f"**Restricción {r}**")
                 dia_restriccion = st.selectbox(
                     "Día",
                     opciones_dias_restriccion,
-                    key=f"restr_dia_{idx}"
+                    key=f"restr_dia_{idx}_{r}"
                 )
                 rc1, rc2 = st.columns(2)
-                with rc1: desde = st.time_input("No disponible desde", value=datetime(2024, 1, 1, 9, 0).time(), key=f"restr_desde_{idx}")
-                with rc2: hasta = st.time_input("No disponible hasta", value=datetime(2024, 1, 1, 14, 0).time(), key=f"restr_hasta_{idx}")
-                restricciones[idx] = {
+                with rc1:
+                    desde = st.time_input(
+                        "No disponible desde",
+                        value=datetime(2024, 1, 1, 9, 0).time(),
+                        key=f"restr_desde_{idx}_{r}"
+                    )
+                with rc2:
+                    hasta = st.time_input(
+                        "No disponible hasta",
+                        value=datetime(2024, 1, 1, 14, 0).time(),
+                        key=f"restr_hasta_{idx}_{r}"
+                    )
+                lista_restricciones.append({
                     "dia": dia_restriccion,
                     "desde": desde,
                     "hasta": hasta
-                }
-
+                })
+                if r < num_restricciones:
+                    st.divider()
+            restricciones[idx] = lista_restricciones
     # 2. CONTROL DE ACCESO
     st.sidebar.divider()
     acceso_pro = st.session_state.get("acceso_pro", False)
@@ -713,13 +742,11 @@ def panel_configuracion():
     
     permitido = plan_gratuito or acceso_pro
     generar = False
-
     if not permitido:
         if mostrar_paywall(): 
             st.rerun() # Si se valida el código, recargamos para habilitar el botón
     else:
         generar = st.sidebar.button("🚀 Generar torneo", type="primary", use_container_width=True, key="btn_unico_generar")
-
     # 3. EJECUCIÓN
     # 3. EJECUCIÓN
     if generar:
