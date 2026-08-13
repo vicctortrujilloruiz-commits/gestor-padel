@@ -4,30 +4,17 @@ import stripe
 # Cargar la clave secreta desde los Secrets de Streamlit
 STRIPE_SECRET_KEY = st.secrets["STRIPE_SECRET_KEY"]
 
-def inicializar_estado():
-    """Asegura que el conjunto de pagos usados exista en el session_state."""
-    if "PAGOS_USADOS" not in st.session_state:
-        st.session_state.PAGOS_USADOS = set()
-
 def es_pago_valido(codigo_pago: str) -> bool:
     """
-    Verifica si un ID de pago de Stripe es válido y no ha sido reutilizado.
-    Soporta formatos pi_... y ch_...
+    Verifica si un ID de pago de Stripe es válido.
+    Si es de 2,99 €, consulta en Stripe si ya fue marcado como 'usado'.
     """
-    inicializar_estado()
-    
-    # 1. Limpieza del código introducido
     codigo_pago = codigo_pago.strip()
 
     if not codigo_pago:
         return False
 
-    # 2. Comprobar si ya se ha usado
-    if codigo_pago in st.session_state.PAGOS_USADOS:
-        st.sidebar.error("❌ Este código de solo 1 uso (2,99 €) ya ha sido consumido.")
-        return False
-
-    # 3. Validar el prefijo oficial de Stripe
+    # Validar formato
     if not (codigo_pago.startswith("pi_") or codigo_pago.startswith("ch_")):
         st.sidebar.error("⚠️ Formato de código incorrecto. Debe empezar por 'pi_' o 'ch_'.")
         return False
@@ -35,17 +22,26 @@ def es_pago_valido(codigo_pago: str) -> bool:
     try:
         stripe.api_key = STRIPE_SECRET_KEY
 
-        # 4. Consulta a la API de Stripe
         if codigo_pago.startswith("pi_"):
             intent = stripe.PaymentIntent.retrieve(codigo_pago)
             estado = intent.status
-            monto = intent.amount
+            monto = intent.amount  # Importe en céntimos
 
             if estado == "succeeded":
-                if monto in [299, 300, 1199, 1200]:
+                # Comprobar si el pase individual (2,99 € / 3,00 €) ya fue consumido en Stripe
+                if monto in [299, 300]:
+                    metadata = intent.metadata or {}
+                    if metadata.get("usado") == "true":
+                        st.sidebar.error("❌ Este pase de 2,99 € ya ha sido utilizado para crear un torneo.")
+                        return False
                     return True
+
+                # Pase PRO / Ilimitado (11,99 € / 12,00 €)
+                elif monto in [1199, 1200]:
+                    return True
+
                 else:
-                    st.sidebar.error(f"⚠️ El importe cobrado en Stripe ({monto / 100:.2f} €) no coincide con 2,99 € o 11,99 €.")
+                    st.sidebar.error(f"⚠️ El importe del pago ({monto / 100:.2f} €) no coincide con 2,99 € ni 11,99 €.")
                     return False
             else:
                 st.sidebar.error(f"⚠️ El pago figura en Stripe con estado: '{estado}'.")
@@ -54,7 +50,13 @@ def es_pago_valido(codigo_pago: str) -> bool:
         elif codigo_pago.startswith("ch_"):
             charge = stripe.Charge.retrieve(codigo_pago)
             if charge.status == "succeeded":
-                if charge.amount in [299, 300, 1199, 1200]:
+                if charge.amount in [299, 300]:
+                    metadata = charge.metadata or {}
+                    if metadata.get("usado") == "true":
+                        st.sidebar.error("❌ Este pase de 2,99 € ya ha sido utilizado.")
+                        return False
+                    return True
+                elif charge.amount in [1199, 1200]:
                     return True
                 else:
                     st.sidebar.error(f"⚠️ El importe del cargo ({charge.amount / 100:.2f} €) no es válido.")
@@ -72,21 +74,29 @@ def es_pago_valido(codigo_pago: str) -> bool:
 
     return False
 
+
 def marcar_como_usado(codigo_pago: str):
     """
-    Marca un código de 2,99 € como consumido para evitar que se vuelva a usar.
+    Escribe directamente en los metadatos del pago en Stripe 'usado = true'.
+    Aplica únicamente a los pases de 2,99 €.
     """
-    inicializar_estado()
     codigo_pago = codigo_pago.strip()
     try:
         stripe.api_key = STRIPE_SECRET_KEY
         if codigo_pago.startswith("pi_"):
             intent = stripe.PaymentIntent.retrieve(codigo_pago)
+            # Solo marcamos como usado si es el pase individual de 2,99 €
             if intent.amount in [299, 300]:
-                st.session_state.PAGOS_USADOS.add(codigo_pago)
+                stripe.PaymentIntent.modify(
+                    codigo_pago,
+                    metadata={"usado": "true"}
+                )
         elif codigo_pago.startswith("ch_"):
             charge = stripe.Charge.retrieve(codigo_pago)
             if charge.amount in [299, 300]:
-                st.session_state.PAGOS_USADOS.add(codigo_pago)
-    except Exception:
-        pass
+                stripe.Charge.modify(
+                    codigo_pago,
+                    metadata={"usado": "true"}
+                )
+    except Exception as e:
+        st.sidebar.warning(f"No se pudo actualizar el estado en Stripe: {str(e)}")
