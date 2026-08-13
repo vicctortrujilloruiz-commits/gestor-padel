@@ -30,8 +30,6 @@ def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
         return True
 
-    dispositivo_id = obtener_dispositivo_id()
-
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
@@ -41,13 +39,13 @@ def mostrar_paywall():
 
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
-        if verificador.es_pago_valido(codigo, dispositivo_id):
+        if verificador.es_pago_valido(codigo):
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
             st.sidebar.success("✅ ¡Acceso verificado!")
             return True
         else:
-            st.sidebar.error("❌ Código no válido, agotado o activo en otro dispositivo.")
+            st.sidebar.error("❌ Código no válido o ya agotado.")
     return False
 def pareja_disponible(
     idx,

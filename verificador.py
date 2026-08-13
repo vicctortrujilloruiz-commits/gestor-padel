@@ -33,48 +33,23 @@ def registrar_codigo_consumido(codigo: str):
     except Exception:
         pass
 
-def validar_licencia_pro_dispositivo(codigo: str, dispositivo_id: str) -> tuple[bool, str]:
-    """
-    Gestiona la licencia PRO en Supabase:
-    - Si es la primera vez que se usa, la vincula al dispositivo actual.
-    - Si ya existe, comprueba si coincide con el dispositivo registrado.
-    """
-    supabase = get_supabase_client()
-    if not supabase:
-        return True, ""
-
-    try:
-        res = supabase.table("licencias_pro").select("dispositivo_id").eq("codigo", codigo).execute()
-        
-        if len(res.data) > 0:
-            dispositivo_registrado = res.data[0].get("dispositivo_id")
-            if dispositivo_registrado == dispositivo_id:
-                return True, ""
-            else:
-                return False, "❌ Esta licencia PRO ya está registrada en otro dispositivo."
-        else:
-            supabase.table("licencias_pro").insert({"codigo": codigo, "dispositivo_id": dispositivo_id}).execute()
-            return True, ""
-    except Exception:
-        return True, ""
-
-def es_pago_valido(codigo_pago: str, dispositivo_id: str = "dispositivo_base") -> bool:
+def es_pago_valido(codigo_pago: str) -> bool:
     """
     Verifica si un ID de pago de Stripe es válido.
-    - Si es de 2,99 €: se quema en Supabase tras usarse.
-    - Si es de 11,99 €: se vincula a 1 solo dispositivo en Supabase.
+    - 2,99 €: Se quema e inhabilita en Supabase.
+    - 11,99 €: Acceso ilimitado sin bloqueos por dispositivo.
     """
     codigo_pago = codigo_pago.strip()
 
     if not codigo_pago:
         return False
 
-    # 1. Verificar si es un pago individual de 2,99 € ya gastado
+    # 1. Si es un pase de 2,99 € ya gastado, lo bloquea
     if es_codigo_usado(codigo_pago):
         st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado para crear un torneo.")
         return False
 
-    # 2. Verificar formato básico de Stripe
+    # 2. Validar formato de Stripe
     if not (codigo_pago.startswith("pi_") or codigo_pago.startswith("ch_")):
         st.sidebar.error("⚠️ Formato de código incorrecto. Debe empezar por 'pi_' o 'ch_'.")
         return False
@@ -88,19 +63,13 @@ def es_pago_valido(codigo_pago: str, dispositivo_id: str = "dispositivo_base") -
             monto = intent.amount
 
             if estado == "succeeded":
-                # Pase individual (2,99 €)
                 if monto in [299, 300]:
                     registrar_codigo_consumido(codigo_pago)
                     return True
-                # Licencia PRO (11,99 €)
                 elif monto in [1199, 1200]:
-                    valido, msg = validar_licencia_pro_dispositivo(codigo_pago, dispositivo_id)
-                    if not valido:
-                        st.sidebar.error(msg)
-                        return False
                     return True
                 else:
-                    st.sidebar.error(f"⚠️ El importe ({monto / 100:.2f} €) no coincide con los planes PRO.")
+                    st.sidebar.error(f"⚠️ El importe ({monto / 100:.2f} €) no coincide con ningún plan.")
                     return False
             else:
                 st.sidebar.error(f"⚠️ El pago figura en Stripe como: '{estado}'.")
@@ -113,10 +82,6 @@ def es_pago_valido(codigo_pago: str, dispositivo_id: str = "dispositivo_base") -
                     registrar_codigo_consumido(codigo_pago)
                     return True
                 elif charge.amount in [1199, 1200]:
-                    valido, msg = validar_licencia_pro_dispositivo(codigo_pago, dispositivo_id)
-                    if not valido:
-                        st.sidebar.error(msg)
-                        return False
                     return True
                 else:
                     st.sidebar.error(f"⚠️ El importe del cargo ({charge.amount / 100:.2f} €) no es válido.")
