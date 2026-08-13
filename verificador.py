@@ -1,43 +1,37 @@
 import streamlit as st
 import stripe
-import requests
-import json
+from supabase import create_client, Client
 
 STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", "")
-SHEET_ID = st.secrets.get("GOOGLE_SHEET_ID", "")
-WEBHOOK_GSHEET_URL = st.secrets.get("WEBHOOK_GSHEET_URL", "")
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
 
-def obtener_codigos_usados_gsheet() -> set:
-    """Lee la lista de códigos usados desde Google Sheets."""
-    if not SHEET_ID:
-        return set()
+@st.cache_resource
+def get_supabase_client() -> Client:
+    if SUPABASE_URL and SUPABASE_KEY:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return None
+
+def es_codigo_usado(codigo: str) -> bool:
+    supabase = get_supabase_client()
+    if not supabase:
+        return False
     try:
-        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            lineas = response.text.splitlines()
-            codigos = {linea.replace('"', '').strip() for linea in lineas[1:] if linea.strip()}
-            return codigos
+        res = supabase.table("codigos_usados").select("codigo").eq("codigo", codigo).execute()
+        return len(res.data) > 0
     except Exception:
-        pass
-    return set()
+        return False
 
 def es_pago_valido(codigo_pago: str) -> bool:
-    """
-    Verifica si un ID de pago de Stripe es válido y no ha sido consumido.
-    """
     codigo_pago = codigo_pago.strip()
 
     if not codigo_pago:
         return False
 
-    # 1. Comprobar en Google Sheets si ya fue consumido antes
-    codigos_usados = obtener_codigos_usados_gsheet()
-    if codigo_pago in codigos_usados:
+    if es_codigo_usado(codigo_pago):
         st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado para crear un torneo.")
         return False
 
-    # 2. Validar formato de Stripe
     if not (codigo_pago.startswith("pi_") or codigo_pago.startswith("ch_")):
         st.sidebar.error("⚠️ Formato de código incorrecto. Debe empezar por 'pi_' o 'ch_'.")
         return False
@@ -81,18 +75,19 @@ def es_pago_valido(codigo_pago: str) -> bool:
 
     return False
 
-
 def marcar_como_usado(codigo_pago: str):
-    """
-    Escribe el código usado en la hoja de Google Sheets vía Apps Script Webhook.
-    Aplica únicamente a pases de 2,99 €.
-    """
     codigo_pago = codigo_pago.strip()
-    
+    if not codigo_pago:
+        return
+
+    supabase = get_supabase_client()
+    if not supabase:
+        return
+
     try:
         stripe.api_key = STRIPE_SECRET_KEY
         es_individual = False
-        
+
         if codigo_pago.startswith("pi_"):
             intent = stripe.PaymentIntent.retrieve(codigo_pago)
             if intent.amount in [299, 300]:
@@ -102,13 +97,7 @@ def marcar_como_usado(codigo_pago: str):
             if charge.amount in [299, 300]:
                 es_individual = True
 
-        # Si es de 2,99 €, enviamos la petición para escribir en Google Sheets
-        if es_individual and WEBHOOK_GSHEET_URL:
-            requests.post(
-                WEBHOOK_GSHEET_URL,
-                data=json.dumps({"codigo": codigo_pago}),
-                headers={"Content-Type": "application/json"},
-                timeout=5
-            )
+        if es_individual:
+            supabase.table("codigos_usados").insert({"codigo": codigo_pago}).execute()
     except Exception:
         pass
