@@ -12,8 +12,10 @@ def get_supabase_client() -> Client:
         return create_client(SUPABASE_URL, SUPABASE_KEY)
     return None
 
+# --- FUNCIONES PARA PASE INDIVIDUAL (2,99 €) ---
+
 def es_codigo_usado(codigo: str) -> bool:
-    """Consulta en Supabase si el código de 2,99 € ya fue registrado."""
+    """Consulta en Supabase si el código de 2,99 € ya fue registrado/quemado."""
     supabase = get_supabase_client()
     if not supabase:
         return False
@@ -24,7 +26,7 @@ def es_codigo_usado(codigo: str) -> bool:
         return False
 
 def registrar_codigo_consumido(codigo: str):
-    """Guarda inmediatamente el código consumido en Supabase."""
+    """Guarda inmediatamente el código consumido de 2,99 € en Supabase."""
     supabase = get_supabase_client()
     if not supabase:
         return
@@ -33,19 +35,51 @@ def registrar_codigo_consumido(codigo: str):
     except Exception:
         pass
 
-def es_pago_valido(codigo_pago: str) -> bool:
+# --- FUNCIONES PARA LICENCIA PRO ANTI-COMPARTIR (11,99 €) ---
+
+def validar_o_registrar_licencia_pro(codigo: str, dispositivo_id: str) -> tuple[bool, str]:
     """
-    Verifica si un ID de pago de Stripe es válido y no ha sido utilizado.
-    Si es de 2,99 € y es válido, lo consume inmediatamente en la base de datos.
+    Comprueba si una licencia PRO (11,99 €) ya está vinculada a un dispositivo.
+    Si es la primera vez que se usa, la vincula al dispositivo actual.
+    Retorna (es_valido, mensaje_error)
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return True, "" # Si falla Supabase, permite el paso temporalmente
+
+    try:
+        res = supabase.table("licencias_pro").select("dispositivo_id").eq("codigo", codigo).execute()
+        
+        # Si la licencia ya fue activada en la base de datos
+        if len(res.data) > 0:
+            dispositivo_registrado = res.data[0].get("dispositivo_id")
+            if dispositivo_registrado == dispositivo_id:
+                return True, ""
+            else:
+                return False, "❌ Esta licencia PRO ya está activa en otro dispositivo."
+        else:
+            # Es la primera vez que se introduce: la vinculamos a este dispositivo
+            supabase.table("licencias_pro").insert({"codigo": codigo, "dispositivo_id": dispositivo_id}).execute()
+            return True, ""
+    except Exception as e:
+        return True, ""
+
+# --- VALIDACIÓN PRINCIPAL DE PAGOS EN STRIPE ---
+
+def es_pago_valido(codigo_pago: str, dispositivo_id: str = "default_device") -> bool:
+    """
+    Verifica si un ID de pago de Stripe es válido.
+    - Si es de 2,99 €: se quema en Supabase.
+    - Si es de 11,99 €: se vincula a 1 solo dispositivo en Supabase.
     """
     codigo_pago = codigo_pago.strip()
 
     if not codigo_pago:
         return False
 
-    # 1. Comprobar si ya fue registrado previamente en Supabase
+    # 1. Comprobar si es un pago individual de 2,99 € ya consumido
     if es_codigo_usado(codigo_pago):
-        st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado.")
+        st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado para crear un torneo.")
         return False
 
     # 2. Validar formato de Stripe
@@ -62,12 +96,16 @@ def es_pago_valido(codigo_pago: str) -> bool:
             monto = intent.amount
 
             if estado == "succeeded":
-                # Si es pase individual de 2,99 € / 3,00 €
+                # Pase individual (2,99 €)
                 if monto in [299, 300]:
                     registrar_codigo_consumido(codigo_pago)
                     return True
-                # Si es pase ilimitado/Pro de 11,99 €
+                # Licencia PRO (11,99 €) -> Control anti-compartir por dispositivo
                 elif monto in [1199, 1200]:
+                    valido, msg = validar_o_registrar_licencia_pro(codigo_pago, dispositivo_id)
+                    if not valido:
+                        st.sidebar.error(msg)
+                        return False
                     return True
                 else:
                     st.sidebar.error(f"⚠️ El importe ({monto / 100:.2f} €) no coincide con 2,99 € ni 11,99 €.")
@@ -83,6 +121,10 @@ def es_pago_valido(codigo_pago: str) -> bool:
                     registrar_codigo_consumido(codigo_pago)
                     return True
                 elif charge.amount in [1199, 1200]:
+                    valido, msg = validar_o_registrar_licencia_pro(codigo_pago, dispositivo_id)
+                    if not valido:
+                        st.sidebar.error(msg)
+                        return False
                     return True
                 else:
                     st.sidebar.error(f"⚠️ El importe del cargo ({charge.amount / 100:.2f} €) no es válido.")
@@ -100,14 +142,8 @@ def es_pago_valido(codigo_pago: str) -> bool:
 
     return False
 
-def marcar_como_usado(codigo_pago: str):
-    """Función de compatibilidad por si se invoca desde app.py."""
-    pass
-
 def es_licencia_pro(codigo_pago: str) -> bool:
-    """
-    Comprueba si el código corresponde a la licencia PRO ilimitada (11,99 €).
-    """
+    """Comprueba si un código pertenece a una licencia PRO de 11,99 €."""
     codigo_pago = codigo_pago.strip()
     if not codigo_pago:
         return False
@@ -122,3 +158,7 @@ def es_licencia_pro(codigo_pago: str) -> bool:
     except Exception:
         pass
     return False
+
+def marcar_como_usado(codigo_pago: str):
+    """Función de compatibilidad."""
+    pass

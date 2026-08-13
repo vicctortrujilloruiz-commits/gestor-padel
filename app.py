@@ -14,27 +14,39 @@ LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
-from streamlit_cookies_controller import CookieController
 
 # Inicializar el controlador de cookies
 cookies = CookieController()
 
+import uuid
+from streamlit_cookies_controller import CookieController
+
+cookies = CookieController()
+
+def obtener_dispositivo_id():
+    """Genera o recupera un ID único eの navegador almacenado en una cookie."""
+    device_id = cookies.get('padel_device_id')
+    if not device_id:
+        device_id = str(uuid.uuid4())
+        cookies.set('padel_device_id', device_id, max_age=86400*365) # Guarda el ID 1 año
+    return device_id
+
 def mostrar_paywall():
-    # 1. Si ya tiene acceso concedido en esta sesión
     if st.session_state.get('acceso_pro', False):
         return True
 
-    # 2. Comprobar si existe una cookie guardada con un código PRO (11,99 €)
+    dispositivo_id = obtener_dispositivo_id()
+
+    # 1. Comprobar si hay una cookie PRO guardada en este navegador
     codigo_cookie = cookies.get('codigo_pro_padel')
     if codigo_cookie:
-        # Validar si el código de la cookie sigue siendo un pago PRO válido
-        if verificador.es_pago_valido(codigo_cookie):
+        if verificador.es_pago_valido(codigo_cookie, dispositivo_id):
             st.session_state['codigo_verificado'] = codigo_cookie
             st.session_state['acceso_pro'] = True
             st.sidebar.success("⭐ Acceso PRO restaurado automáticamente.")
             return True
 
-    # 3. Si no hay cookie o no es válida, mostrar el bloqueo (Paywall)
+    # 2. Si no hay cookie o no es válida, pedir código
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
@@ -44,18 +56,18 @@ def mostrar_paywall():
 
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     if codigo:
-        if verificador.es_pago_valido(codigo):
+        if verificador.es_pago_valido(codigo, dispositivo_id):
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
             
-            # Si es un código PRO de 11,99 €, guardamos la cookie para que recuerde la sesión al recargar
+            # Guardar cookie si es PRO
             if verificador.es_licencia_pro(codigo):
-                cookies.set('codigo_pro_padel', codigo, max_age=86400*30) # Se guarda durante 30 días
+                cookies.set('codigo_pro_padel', codigo, max_age=86400*30)
                 
             st.sidebar.success("✅ ¡Acceso verificado!")
             return True
         else:
-            st.sidebar.error("❌ Código no válido o ya usado.")
+            st.sidebar.error("❌ Código no válido, agotado o activo en otro dispositivo.")
     return False
 def pareja_disponible(
     idx,
