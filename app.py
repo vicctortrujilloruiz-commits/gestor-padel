@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import verificador
+import json
+from datetime import datetime, timedelta, time as dt_time
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
@@ -17,8 +19,47 @@ st.set_page_config(
 # ... (resto de tus importaciones y lógica)
 
 def main():
-    st.title("🎾 GeneradorPadel")
-    st.caption("Crea tu torneo, genera el cuadro y cuadra los horarios con restricciones en segundos.")
+    st.title("🎾 Gestor de Torneos de Pádel")
+    st.caption("Parejas fijas · Fase previa · Eliminatoria (mejor perdedor)")
+
+    if st.session_state.etapa != "config":
+        with st.sidebar:
+            st.info(f"Torneo en curso con {len(st.session_state.parejas)} parejas.")
+            if st.button("🔄 Empezar un torneo nuevo", use_container_width=True):
+                reiniciar_torneo()
+
+    # --- NUEVO: guardar / cargar torneo ---
+    with st.sidebar:
+        st.divider()
+        st.subheader("💾 Guardar / Cargar torneo")
+
+        if st.session_state.etapa != "config":
+            st.download_button(
+                "💾 Descargar Copia del Torneo",
+                data=exportar_torneo(),
+                file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+        archivo_torneo = st.file_uploader(
+            "📂 Cargar Torneo Guardado (.json)",
+            type=["json"],
+            key="cargador_torneo"
+        )
+        if archivo_torneo is not None:
+            if st.button("♻️ Restaurar este torneo", use_container_width=True):
+                try:
+                    contenido = archivo_torneo.read().decode("utf-8")
+                    cargar_torneo(contenido)
+                    st.success("✅ Torneo restaurado correctamente.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ No se pudo cargar el archivo: {e}")
+
+    barra_progreso()
+    st.divider()
+    # ... (resto de main() igual)
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
@@ -30,6 +71,54 @@ def obtener_dispositivo_id():
     if 'padel_device_id' not in st.session_state:
         st.session_state['padel_device_id'] = str(uuid.uuid4())
     return st.session_state['padel_device_id']
+CAMPOS_TORNEO = [
+    "etapa", "parejas", "restricciones", "pistas", "dias", "duracion",
+    "formato", "partidos_por_pareja", "rondas_programadas",
+    "partidos_sin_hueco", "clasificacion", "clasificados",
+    "eliminados_previa", "cuadro_actual", "ronda_eliminatoria_num",
+    "partidos_ronda_actual", "partidos_ronda_actual_num", "campeon",
+    "liguilla_partido", "liguilla_campeon"
+]
+
+def _serializar_valor(valor):
+    if isinstance(valor, datetime):
+        return {"__tipo__": "datetime", "valor": valor.isoformat()}
+    if isinstance(valor, dt_time):
+        return {"__tipo__": "time", "valor": valor.isoformat()}
+    if isinstance(valor, tuple):
+        return [_serializar_valor(v) for v in valor]
+    if isinstance(valor, dict):
+        return {str(k): _serializar_valor(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_serializar_valor(v) for v in valor]
+    return valor
+
+def _deserializar_valor(valor):
+    if isinstance(valor, dict):
+        if valor.get("__tipo__") == "datetime":
+            return datetime.fromisoformat(valor["valor"])
+        if valor.get("__tipo__") == "time":
+            return dt_time.fromisoformat(valor["valor"])
+        return {k: _deserializar_valor(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_deserializar_valor(v) for v in valor]
+    return valor
+
+def exportar_torneo():
+    datos = {campo: _serializar_valor(st.session_state.get(campo)) for campo in CAMPOS_TORNEO}
+    return json.dumps(datos, ensure_ascii=False, indent=2)
+
+def cargar_torneo(contenido_json):
+    datos = json.loads(contenido_json)
+    for campo in CAMPOS_TORNEO:
+        if campo not in datos:
+            continue
+        valor = _deserializar_valor(datos[campo])
+        # Los dicts con claves int (restricciones, partidos_por_pareja)
+        # vuelven como str tras el JSON; los reconvertimos.
+        if campo in ("restricciones", "partidos_por_pareja") and isinstance(valor, dict):
+            valor = {int(k): v for k, v in valor.items()}
+        st.session_state[campo] = valor
 def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
         return True
