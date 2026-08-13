@@ -3,4 +3,3 @@ pandas
 stripe
 requests
 supabase
-streamlit-cookies-controller

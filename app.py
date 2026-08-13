@@ -1,33 +1,30 @@
 import random
 import math
+import uuid
 from datetime import datetime, timedelta
 import streamlit as st
 import pandas as pd
 import verificador
+
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
 st.set_page_config(page_title="🎾 Gestor de Torneos de Pádel", page_icon="🎾", layout="wide")
+
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
+
 LIMITE_PAREJAS_GRATIS = 8
 LIMITE_PISTAS_GRATIS = 2
+
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
 
-
-import uuid
-from streamlit_cookies_controller import CookieController
-
-cookies = CookieController()
-
 def obtener_dispositivo_id():
-    """Genera o recupera un ID único e navegador almacenado en una cookie."""
-    device_id = cookies.get('padel_device_id')
-    if not device_id:
-        device_id = str(uuid.uuid4())
-        cookies.set('padel_device_id', device_id, max_age=86400*365) # Guarda el ID 1 año
-    return device_id
+    """Genera un ID único para la sesión actual."""
+    if 'padel_device_id' not in st.session_state:
+        st.session_state['padel_device_id'] = str(uuid.uuid4())
+    return st.session_state['padel_device_id']
 
 def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
@@ -35,16 +32,6 @@ def mostrar_paywall():
 
     dispositivo_id = obtener_dispositivo_id()
 
-    # 1. Comprobar si hay una cookie PRO guardada en este navegador
-    codigo_cookie = cookies.get('codigo_pro_padel')
-    if codigo_cookie:
-        if verificador.es_pago_valido(codigo_cookie, dispositivo_id):
-            st.session_state['codigo_verificado'] = codigo_cookie
-            st.session_state['acceso_pro'] = True
-            st.sidebar.success("⭐ Acceso PRO restaurado automáticamente.")
-            return True
-
-    # 2. Si no hay cookie o no es válida, pedir código
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
@@ -57,11 +44,6 @@ def mostrar_paywall():
         if verificador.es_pago_valido(codigo, dispositivo_id):
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
-            
-            # Guardar cookie si es PRO
-            if verificador.es_licencia_pro(codigo):
-                cookies.set('codigo_pro_padel', codigo, max_age=86400*30)
-                
             st.sidebar.success("✅ ¡Acceso verificado!")
             return True
         else:
