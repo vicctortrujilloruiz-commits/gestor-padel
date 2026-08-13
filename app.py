@@ -15,8 +15,6 @@ LIMITE_PISTAS_GRATIS = 2
 def es_plan_gratuito(num_parejas, num_pistas, restricciones_horarias):
     return (num_parejas <= LIMITE_PAREJAS_GRATIS and num_pistas <= LIMITE_PISTAS_GRATIS and not restricciones_horarias)
 
-# Inicializar el controlador de cookies
-cookies = CookieController()
 
 import uuid
 from streamlit_cookies_controller import CookieController
@@ -24,7 +22,7 @@ from streamlit_cookies_controller import CookieController
 cookies = CookieController()
 
 def obtener_dispositivo_id():
-    """Genera o recupera un ID único eの navegador almacenado en una cookie."""
+    """Genera o recupera un ID único e navegador almacenado en una cookie."""
     device_id = cookies.get('padel_device_id')
     if not device_id:
         device_id = str(uuid.uuid4())
