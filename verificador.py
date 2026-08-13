@@ -1,29 +1,43 @@
 import streamlit as st
 import stripe
+import requests
+import json
 
-# Cargar la clave secreta desde los Secrets de Streamlit
-STRIPE_SECRET_KEY = st.secrets["STRIPE_SECRET_KEY"]
+STRIPE_SECRET_KEY = st.secrets.get("STRIPE_SECRET_KEY", "")
+SHEET_ID = st.secrets.get("GOOGLE_SHEET_ID", "")
+WEBHOOK_GSHEET_URL = st.secrets.get("WEBHOOK_GSHEET_URL", "")
 
-def _inicializar_estado():
-    if "PAGOS_USADOS" not in st.session_state:
-        st.session_state.PAGOS_USADOS = set()
+def obtener_codigos_usados_gsheet() -> set:
+    """Lee la lista de códigos usados desde Google Sheets."""
+    if not SHEET_ID:
+        return set()
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            lineas = response.text.splitlines()
+            codigos = {linea.replace('"', '').strip() for linea in lineas[1:] if linea.strip()}
+            return codigos
+    except Exception:
+        pass
+    return set()
 
 def es_pago_valido(codigo_pago: str) -> bool:
     """
-    Verifica si un ID de pago de Stripe es válido.
+    Verifica si un ID de pago de Stripe es válido y no ha sido consumido.
     """
-    _inicializar_estado()
     codigo_pago = codigo_pago.strip()
 
     if not codigo_pago:
         return False
 
-    # 1. Comprobar memoria de sesión
-    if codigo_pago in st.session_state.PAGOS_USADOS:
-        st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado en esta sesión.")
+    # 1. Comprobar en Google Sheets si ya fue consumido antes
+    codigos_usados = obtener_codigos_usados_gsheet()
+    if codigo_pago in codigos_usados:
+        st.sidebar.error("❌ Este código de 2,99 € ya ha sido utilizado para crear un torneo.")
         return False
 
-    # 2. Validar prefijo oficial de Stripe
+    # 2. Validar formato de Stripe
     if not (codigo_pago.startswith("pi_") or codigo_pago.startswith("ch_")):
         st.sidebar.error("⚠️ Formato de código incorrecto. Debe empezar por 'pi_' o 'ch_'.")
         return False
@@ -34,10 +48,9 @@ def es_pago_valido(codigo_pago: str) -> bool:
         if codigo_pago.startswith("pi_"):
             intent = stripe.PaymentIntent.retrieve(codigo_pago)
             estado = intent.status
-            monto = intent.amount  # Importe en céntimos
+            monto = intent.amount
 
             if estado == "succeeded":
-                # Comprobar pases de 2,99 € / 3,00 € o Pro 11,99 € / 12,00 €
                 if monto in [299, 300, 1199, 1200]:
                     return True
                 else:
@@ -71,19 +84,31 @@ def es_pago_valido(codigo_pago: str) -> bool:
 
 def marcar_como_usado(codigo_pago: str):
     """
-    Marca el código de 2,99 € como consumido en la sesión actual.
+    Escribe el código usado en la hoja de Google Sheets vía Apps Script Webhook.
+    Aplica únicamente a pases de 2,99 €.
     """
-    _inicializar_estado()
     codigo_pago = codigo_pago.strip()
+    
     try:
         stripe.api_key = STRIPE_SECRET_KEY
+        es_individual = False
+        
         if codigo_pago.startswith("pi_"):
             intent = stripe.PaymentIntent.retrieve(codigo_pago)
             if intent.amount in [299, 300]:
-                st.session_state.PAGOS_USADOS.add(codigo_pago)
+                es_individual = True
         elif codigo_pago.startswith("ch_"):
             charge = stripe.Charge.retrieve(codigo_pago)
             if charge.amount in [299, 300]:
-                st.session_state.PAGOS_USADOS.add(codigo_pago)
+                es_individual = True
+
+        # Si es de 2,99 €, enviamos la petición para escribir en Google Sheets
+        if es_individual and WEBHOOK_GSHEET_URL:
+            requests.post(
+                WEBHOOK_GSHEET_URL,
+                data=json.dumps({"codigo": codigo_pago}),
+                headers={"Content-Type": "application/json"},
+                timeout=5
+            )
     except Exception:
         pass
