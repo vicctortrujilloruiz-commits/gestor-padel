@@ -18,30 +18,34 @@ st.set_page_config(
 
 # ... (resto de tus importaciones y lógica)
 
+# ==================================================================
+# APLICACIÓN PRINCIPAL (MAIN)
+# ==================================================================
 def main():
-    st.title("🎾 Gestor de Torneos de Pádel")
-    st.caption("Parejas fijas · Fase previa · Eliminatoria (mejor perdedor)")
+    st.title("🎾 GeneradorPadel")
+    st.caption("Generador de Cuadros y Horarios Automáticos con Restricciones")
 
-    if st.session_state.etapa != "config":
-        with st.sidebar:
+    # --- BARRA LATERAL: BOTÓN REINICIAR Y SECCIÓN GUARDAR / CARGAR ---
+    with st.sidebar:
+        if st.session_state.etapa != "config":
             st.info(f"Torneo en curso con {len(st.session_state.parejas)} parejas.")
             if st.button("🔄 Empezar un torneo nuevo", use_container_width=True):
                 reiniciar_torneo()
 
-    # --- NUEVO: guardar / cargar torneo ---
-    with st.sidebar:
         st.divider()
         st.subheader("💾 Guardar / Cargar torneo")
 
+        # Botón para descargar el torneo en curso
         if st.session_state.etapa != "config":
             st.download_button(
-                "💾 Descargar Copia del Torneo",
+                "💾 Descargar Copia del Torneo (.json)",
                 data=exportar_torneo(),
                 file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                 mime="application/json",
                 use_container_width=True
             )
 
+        # Cargador para subir un archivo .json guardado previamente
         archivo_torneo = st.file_uploader(
             "📂 Cargar Torneo Guardado (.json)",
             type=["json"],
@@ -59,7 +63,26 @@ def main():
 
     barra_progreso()
     st.divider()
-    # ... (resto de main() igual)
+
+    # Navegación por etapas
+    if st.session_state.etapa == "config":
+        panel_configuracion()
+        st.info("👈 Configura las parejas, pistas, días y duración en la barra lateral y pulsa **Generar torneo**.")
+    elif st.session_state.etapa == "previa":
+        mostrar_formato()
+        st.divider()
+        panel_fase_previa()
+    elif st.session_state.etapa == "clasificacion":
+        panel_clasificacion()
+    elif st.session_state.etapa == "liguilla_final":
+        panel_liguilla_final()
+    elif st.session_state.etapa == "eliminatoria":
+        panel_eliminatoria()
+    elif st.session_state.etapa == "final":
+        panel_final()
+
+if __name__ == "__main__":
+    main()
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
@@ -1276,36 +1299,6 @@ def barra_progreso():
 # ==================================================================
 # 13. APP PRINCIPAL
 # ==================================================================
-def main():
-    st.title("🎾 Gestor de Torneos de Pádel")
-    st.caption("Parejas fijas · Fase previa · Eliminatoria (mejor perdedor)")
-    if st.session_state.etapa != "config":
-        with st.sidebar:
-            st.info(
-                f"Torneo en curso con {len(st.session_state.parejas)} "
-                "parejas."
-            )
-            if st.button("🔄 Empezar un torneo nuevo", use_container_width=True):
-                reiniciar_torneo()
-    barra_progreso()
-    st.divider()
-    if st.session_state.etapa == "config":
-        panel_configuracion()
-        st.info(
-            "👈 Configura las parejas, pistas, días y duración en la "
-            "barra lateral y pulsa **Generar torneo**."
-        )
-    elif st.session_state.etapa == "previa":
-        mostrar_formato()
-        st.divider()
-        panel_fase_previa()
-    elif st.session_state.etapa == "clasificacion":
-        panel_clasificacion()
-    elif st.session_state.etapa == "liguilla_final":
-        panel_liguilla_final()
-    elif st.session_state.etapa == "eliminatoria":
-        panel_eliminatoria()
-    elif st.session_state.etapa == "final":
-        panel_final()
+
 if __name__ == "__main__":
     main()
