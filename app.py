@@ -8,7 +8,17 @@ import verificador
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
-st.set_page_config(page_title="🎾 Gestor de Torneos de Pádel", page_icon="🎾", layout="wide")
+st.set_page_config(
+    page_title="GeneradorPadel | Cuadros y Horarios Automáticos",
+    page_icon="🎾",
+    layout="wide"
+)
+
+# ... (resto de tus importaciones y lógica)
+
+def main():
+    st.title("🎾 GeneradorPadel")
+    st.caption("Crea tu torneo, genera el cuadro y cuadra los horarios con restricciones en segundos.")
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
@@ -23,21 +33,23 @@ def obtener_dispositivo_id():
 def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
         return True
+
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
         st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
     with col2: 
         st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
+
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
+    email = st.sidebar.text_input("📧 Correo de la compra (solo si es Licencia PRO):", key="email_input").strip()
+
     if codigo:
-        if verificador.es_pago_valido(codigo):
+        if verificador.es_pago_valido(codigo, email):
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
             st.sidebar.success("✅ ¡Acceso verificado!")
             return True
-        else:
-            st.sidebar.error("❌ Código no válido o ya agotado.")
     return False
 def pareja_disponible(
     idx,
