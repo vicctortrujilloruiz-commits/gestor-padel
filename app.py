@@ -49,18 +49,41 @@ def mostrar_paywall():
     return False
 def pareja_disponible(
     idx,
+    dia_partido,
     hora_inicio_partido,
     hora_fin_partido,
     restricciones
 ):
+    """
+    Comprueba si la pareja `idx` puede jugar un partido que
+    empieza en `dia_partido` entre `hora_inicio_partido` y
+    `hora_fin_partido`.
+
+    `restricciones[idx]` es un dict con:
+      - "dia": etiqueta de un día concreto (ej. "Día 2") o
+        "Todos" si la restricción aplica a todos los días.
+      - "desde" / "hasta": franja horaria en la que la pareja
+        NO puede jugar ese día (hora de bloqueo, no de
+        disponibilidad).
+
+    Si la restricción no aplica a `dia_partido` (porque es de
+    otro día distinto y no es "Todos"), la pareja está
+    disponible sin más comprobaciones.
+    """
     if idx not in restricciones:
         return True
-    disponible_desde, disponible_hasta = restricciones[idx]
-    return (
-        hora_inicio_partido.time() >= disponible_desde
+    restriccion = restricciones[idx]
+    dia_restringido = restriccion["dia"]
+    if dia_restringido != "Todos" and dia_restringido != dia_partido:
+        return True
+    bloqueado_desde = restriccion["desde"]
+    bloqueado_hasta = restriccion["hasta"]
+    hay_solape = (
+        hora_inicio_partido.time() < bloqueado_hasta
         and
-        hora_fin_partido.time() <= disponible_hasta
+        hora_fin_partido.time() > bloqueado_desde
     )
+    return not hay_solape
 def obtener_slots(
     dias,
     duracion
@@ -361,6 +384,7 @@ def asignar_horarios(
                     disponibles = (
                         pareja_disponible(
                             a,
+                            slot["dia"],
                             hora_inicio,
                             hora_fin,
                             restricciones
@@ -368,6 +392,7 @@ def asignar_horarios(
                         and
                         pareja_disponible(
                             b,
+                            slot["dia"],
                             hora_inicio,
                             hora_fin,
                             restricciones
@@ -664,12 +689,22 @@ def panel_configuracion():
 
     with st.sidebar.expander("🕐 Restricciones horarias"):
         restricciones = {}
+        opciones_dias_restriccion = ["Todos"] + [d["etiqueta"] for d in dias_ui]
         for idx, pareja in enumerate(nombres):
             if pareja[0] and pareja[1] and st.checkbox(f"{pareja[0]}/{pareja[1]} tiene restricción", key=f"restr_check_{idx}"):
+                dia_restriccion = st.selectbox(
+                    "Día",
+                    opciones_dias_restriccion,
+                    key=f"restr_dia_{idx}"
+                )
                 rc1, rc2 = st.columns(2)
-                with rc1: desde = st.time_input("Desde", value=datetime(2024, 1, 1, 9, 0).time(), key=f"restr_desde_{idx}")
-                with rc2: hasta = st.time_input("Hasta", value=datetime(2024, 1, 1, 22, 0).time(), key=f"restr_hasta_{idx}")
-                restricciones[idx] = (desde, hasta)
+                with rc1: desde = st.time_input("No disponible desde", value=datetime(2024, 1, 1, 9, 0).time(), key=f"restr_desde_{idx}")
+                with rc2: hasta = st.time_input("No disponible hasta", value=datetime(2024, 1, 1, 14, 0).time(), key=f"restr_hasta_{idx}")
+                restricciones[idx] = {
+                    "dia": dia_restriccion,
+                    "desde": desde,
+                    "hasta": hasta
+                }
 
     # 2. CONTROL DE ACCESO
     st.sidebar.divider()
