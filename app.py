@@ -1,12 +1,11 @@
 import random
 import math
 import uuid
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, time as dt_time
 import streamlit as st
 import pandas as pd
 import verificador
-import json
-from datetime import datetime, timedelta, time as dt_time
 # ==================================================================
 # CONFIGURACIÓN DE LA PÁGINA
 # ==================================================================
@@ -15,74 +14,6 @@ st.set_page_config(
     page_icon="🎾",
     layout="wide"
 )
-
-# ... (resto de tus importaciones y lógica)
-
-# ==================================================================
-# APLICACIÓN PRINCIPAL (MAIN)
-# ==================================================================
-def main():
-    st.title("🎾 GeneradorPadel")
-    st.caption("Generador de Cuadros y Horarios Automáticos con Restricciones")
-
-    # --- BARRA LATERAL: BOTÓN REINICIAR Y SECCIÓN GUARDAR / CARGAR ---
-    with st.sidebar:
-        if st.session_state.etapa != "config":
-            st.info(f"Torneo en curso con {len(st.session_state.parejas)} parejas.")
-            if st.button("🔄 Empezar un torneo nuevo", use_container_width=True):
-                reiniciar_torneo()
-
-        st.divider()
-        st.subheader("💾 Guardar / Cargar torneo")
-
-        # Botón para descargar el torneo en curso
-        if st.session_state.etapa != "config":
-            st.download_button(
-                "💾 Descargar Copia del Torneo (.json)",
-                data=exportar_torneo(),
-                file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-
-        # Cargador para subir un archivo .json guardado previamente
-        archivo_torneo = st.file_uploader(
-            "📂 Cargar Torneo Guardado (.json)",
-            type=["json"],
-            key="cargador_torneo"
-        )
-        if archivo_torneo is not None:
-            if st.button("♻️ Restaurar este torneo", use_container_width=True):
-                try:
-                    contenido = archivo_torneo.read().decode("utf-8")
-                    cargar_torneo(contenido)
-                    st.success("✅ Torneo restaurado correctamente.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ No se pudo cargar el archivo: {e}")
-
-    barra_progreso()
-    st.divider()
-
-    # Navegación por etapas
-    if st.session_state.etapa == "config":
-        panel_configuracion()
-        st.info("👈 Configura las parejas, pistas, días y duración en la barra lateral y pulsa **Generar torneo**.")
-    elif st.session_state.etapa == "previa":
-        mostrar_formato()
-        st.divider()
-        panel_fase_previa()
-    elif st.session_state.etapa == "clasificacion":
-        panel_clasificacion()
-    elif st.session_state.etapa == "liguilla_final":
-        panel_liguilla_final()
-    elif st.session_state.etapa == "eliminatoria":
-        panel_eliminatoria()
-    elif st.session_state.etapa == "final":
-        panel_final()
-
-if __name__ == "__main__":
-    main()
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
@@ -94,74 +25,28 @@ def obtener_dispositivo_id():
     if 'padel_device_id' not in st.session_state:
         st.session_state['padel_device_id'] = str(uuid.uuid4())
     return st.session_state['padel_device_id']
-CAMPOS_TORNEO = [
-    "etapa", "parejas", "restricciones", "pistas", "dias", "duracion",
-    "formato", "partidos_por_pareja", "rondas_programadas",
-    "partidos_sin_hueco", "clasificacion", "clasificados",
-    "eliminados_previa", "cuadro_actual", "ronda_eliminatoria_num",
-    "partidos_ronda_actual", "partidos_ronda_actual_num", "campeon",
-    "liguilla_partido", "liguilla_campeon"
-]
-
-def _serializar_valor(valor):
-    if isinstance(valor, datetime):
-        return {"__tipo__": "datetime", "valor": valor.isoformat()}
-    if isinstance(valor, dt_time):
-        return {"__tipo__": "time", "valor": valor.isoformat()}
-    if isinstance(valor, tuple):
-        return [_serializar_valor(v) for v in valor]
-    if isinstance(valor, dict):
-        return {str(k): _serializar_valor(v) for k, v in valor.items()}
-    if isinstance(valor, list):
-        return [_serializar_valor(v) for v in valor]
-    return valor
-
-def _deserializar_valor(valor):
-    if isinstance(valor, dict):
-        if valor.get("__tipo__") == "datetime":
-            return datetime.fromisoformat(valor["valor"])
-        if valor.get("__tipo__") == "time":
-            return dt_time.fromisoformat(valor["valor"])
-        return {k: _deserializar_valor(v) for k, v in valor.items()}
-    if isinstance(valor, list):
-        return [_deserializar_valor(v) for v in valor]
-    return valor
-
-def exportar_torneo():
-    datos = {campo: _serializar_valor(st.session_state.get(campo)) for campo in CAMPOS_TORNEO}
-    return json.dumps(datos, ensure_ascii=False, indent=2)
-
-def cargar_torneo(contenido_json):
-    datos = json.loads(contenido_json)
-    for campo in CAMPOS_TORNEO:
-        if campo not in datos:
-            continue
-        valor = _deserializar_valor(datos[campo])
-        # Los dicts con claves int (restricciones, partidos_por_pareja)
-        # vuelven como str tras el JSON; los reconvertimos.
-        if campo in ("restricciones", "partidos_por_pareja") and isinstance(valor, dict):
-            valor = {int(k): v for k, v in valor.items()}
-        st.session_state[campo] = valor
 def mostrar_paywall():
     if st.session_state.get('acceso_pro', False):
         return True
-
     st.sidebar.warning("🔒 Has superado los límites del **Plan Gratuito**. Elige una opción PRO:")
     col1, col2 = st.sidebar.columns(2)
     with col1: 
         st.markdown(f'<a href="{STRIPE_LINK_PASE_1_TORNEO}" target="_blank" style="display: block; text-align: center; background-color: #2563eb; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">🎟️ Pase 1 Torneo</a>', unsafe_allow_html=True)
     with col2: 
         st.markdown(f'<a href="{STRIPE_LINK_PRO_ILIMITADA}" target="_blank" style="display: block; text-align: center; background-color: #7c3aed; color: #ffffff; padding: 10px 6px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 13px;">⭐ Licencia Pro</a>', unsafe_allow_html=True)
-
     codigo = st.sidebar.text_input("🔑 Código de acceso (ID de pago):", key="cod_input").strip()
     email = st.sidebar.text_input("📧 Correo de la compra (solo si es Licencia PRO):", key="email_input").strip()
-
     if codigo:
+        clave_verificacion = f"{codigo}|{email.lower()}"
+        if st.session_state.get('ultimo_codigo_fallido') == clave_verificacion:
+            return False
         if verificador.es_pago_valido(codigo, email):
             st.session_state['codigo_verificado'] = codigo
             st.session_state['acceso_pro'] = True
             st.sidebar.success("✅ ¡Acceso verificado!")
             return True
+        else:
+            st.session_state['ultimo_codigo_fallido'] = clave_verificacion
     return False
 def pareja_disponible(
     idx,
@@ -174,7 +59,6 @@ def pareja_disponible(
     Comprueba si la pareja `idx` puede jugar un partido que
     empieza en `dia_partido` entre `hora_inicio_partido` y
     `hora_fin_partido`.
-
     `restricciones[idx]` es ahora una LISTA de dicts (una pareja
     puede tener varias restricciones, en distintos días o incluso
     varias en el mismo día). Cada dict tiene:
@@ -183,7 +67,6 @@ def pareja_disponible(
       - "desde" / "hasta": franja horaria en la que la pareja
         NO puede jugar ese día (hora de bloqueo, no de
         disponibilidad).
-
     La pareja NO está disponible si CUALQUIERA de sus
     restricciones se solapa con el partido. Si ninguna
     restricción aplica o ninguna solapa, está disponible.
@@ -872,7 +755,6 @@ def panel_configuracion():
     else:
         generar = st.sidebar.button("🚀 Generar torneo", type="primary", use_container_width=True, key="btn_unico_generar")
     # 3. EJECUCIÓN
-    # 3. EJECUCIÓN
     if generar:
         nombres_validos = [p for p in nombres if p[0] and p[1]]
         if len(nombres_validos) != num_parejas:
@@ -1297,8 +1179,126 @@ def barra_progreso():
         )
     )
 # ==================================================================
+# 14. GUARDAR / CARGAR TORNEO (.json)
+# ==================================================================
+CAMPOS_TORNEO = [
+    "etapa", "parejas", "restricciones", "pistas", "dias", "duracion",
+    "formato", "partidos_por_pareja", "rondas_programadas",
+    "partidos_sin_hueco", "clasificacion", "clasificados",
+    "eliminados_previa", "cuadro_actual", "ronda_eliminatoria_num",
+    "partidos_ronda_actual", "partidos_ronda_actual_num", "campeon",
+    "liguilla_partido", "liguilla_campeon"
+]
+def _serializar_valor(valor):
+    """Convierte recursivamente datetime/time/tuplas en estructuras
+    que json.dumps puede manejar, preservando el tipo original."""
+    if isinstance(valor, datetime):
+        return {"__tipo__": "datetime", "valor": valor.isoformat()}
+    if isinstance(valor, dt_time):
+        return {"__tipo__": "time", "valor": valor.isoformat()}
+    if isinstance(valor, tuple):
+        return [_serializar_valor(v) for v in valor]
+    if isinstance(valor, dict):
+        return {str(k): _serializar_valor(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_serializar_valor(v) for v in valor]
+    return valor
+def _deserializar_valor(valor):
+    """Inversa de _serializar_valor: reconstruye datetime/time a
+    partir de los marcadores __tipo__ guardados en el JSON."""
+    if isinstance(valor, dict):
+        if valor.get("__tipo__") == "datetime":
+            return datetime.fromisoformat(valor["valor"])
+        if valor.get("__tipo__") == "time":
+            return dt_time.fromisoformat(valor["valor"])
+        return {k: _deserializar_valor(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_deserializar_valor(v) for v in valor]
+    return valor
+def exportar_torneo():
+    """Devuelve un string JSON con todo el estado actual del torneo:
+    parejas, horarios, pistas, restricciones y resultados."""
+    datos = {
+        campo: _serializar_valor(st.session_state.get(campo))
+        for campo in CAMPOS_TORNEO
+    }
+    return json.dumps(datos, ensure_ascii=False, indent=2)
+def cargar_torneo(contenido_json):
+    """Restaura en st.session_state todo el estado de un torneo
+    exportado previamente con exportar_torneo()."""
+    datos = json.loads(contenido_json)
+    for campo in CAMPOS_TORNEO:
+        if campo not in datos:
+            continue
+        valor = _deserializar_valor(datos[campo])
+        # Los dicts con claves int (restricciones, partidos_por_pareja)
+        # vuelven como str tras pasar por JSON; los reconvertimos.
+        if campo in ("restricciones", "partidos_por_pareja") and isinstance(valor, dict):
+            valor = {int(k): v for k, v in valor.items()}
+        st.session_state[campo] = valor
+def panel_guardar_cargar():
+    st.sidebar.divider()
+    st.sidebar.subheader("💾 Guardar / Cargar torneo")
+    if st.session_state.etapa != "config":
+        st.sidebar.download_button(
+            "💾 Descargar Copia del Torneo",
+            data=exportar_torneo(),
+            file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    else:
+        st.sidebar.caption(
+            "Genera un torneo para poder descargar una copia."
+        )
+    archivo_torneo = st.sidebar.file_uploader(
+        "📂 Cargar Torneo Guardado (.json)",
+        type=["json"],
+        key="cargador_torneo"
+    )
+    if archivo_torneo is not None:
+        if st.sidebar.button("♻️ Restaurar este torneo", use_container_width=True):
+            try:
+                contenido = archivo_torneo.read().decode("utf-8")
+                cargar_torneo(contenido)
+                st.sidebar.success("✅ Torneo restaurado correctamente.")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"❌ No se pudo cargar el archivo: {e}")
+# ==================================================================
 # 13. APP PRINCIPAL
 # ==================================================================
-
+def main():
+    st.title("🎾 Gestor de Torneos de Pádel")
+    st.caption("Parejas fijas · Fase previa · Eliminatoria (mejor perdedor)")
+    if st.session_state.etapa != "config":
+        with st.sidebar:
+            st.info(
+                f"Torneo en curso con {len(st.session_state.parejas)} "
+                "parejas."
+            )
+            if st.button("🔄 Empezar un torneo nuevo", use_container_width=True):
+                reiniciar_torneo()
+    panel_guardar_cargar()
+    barra_progreso()
+    st.divider()
+    if st.session_state.etapa == "config":
+        panel_configuracion()
+        st.info(
+            "👈 Configura las parejas, pistas, días y duración en la "
+            "barra lateral y pulsa **Generar torneo**."
+        )
+    elif st.session_state.etapa == "previa":
+        mostrar_formato()
+        st.divider()
+        panel_fase_previa()
+    elif st.session_state.etapa == "clasificacion":
+        panel_clasificacion()
+    elif st.session_state.etapa == "liguilla_final":
+        panel_liguilla_final()
+    elif st.session_state.etapa == "eliminatoria":
+        panel_eliminatoria()
+    elif st.session_state.etapa == "final":
+        panel_final()
 if __name__ == "__main__":
     main()
