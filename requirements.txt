@@ -3,3 +3,5 @@ pandas
 stripe
 requests
 supabase
+fpdf2
+pillow
