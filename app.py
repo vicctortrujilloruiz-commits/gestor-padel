@@ -21,6 +21,10 @@ st.set_page_config(
     page_icon="🎾",
     layout="wide"
 )
+
+# --- MODO SOLO LECTURA (Vista Jugador) ---
+MODO_JUGADOR = "modo" in st.query_params and st.query_params["modo"] == "jugador"
+
 STRIPE_LINK_PASE_1_TORNEO = "https://buy.stripe.com/aFabJ18hJ7HGdoVeWNfbq00"
 STRIPE_LINK_PRO_ILIMITADA = "https://buy.stripe.com/7sYcN555x7HG5WtaGxfbq01"
 LIMITE_PAREJAS_GRATIS = 8
@@ -721,11 +725,9 @@ def panel_configuracion():
         bracket_calc = calcular_tamano_cuadro(num_parejas)
         partidos_previos_calc = math.ceil(num_parejas * 1.5)
         partidos_fase_final_calc = bracket_calc - 1
-
     partidos_totales_torneo = partidos_previos_calc + partidos_fase_final_calc
     capacidad_slots = calcular_capacidad(dias_ui, list(range(num_pistas)), duracion)
     capacidad_insuficiente = capacidad_slots < partidos_totales_torneo
-
     if capacidad_insuficiente:
         faltan = partidos_totales_torneo - capacidad_slots
         st.sidebar.error(
@@ -896,6 +898,61 @@ def formulario_resultado(partido, key_prefix):
                 ganador = pareja_a if resultado["ganador"] == "a" else pareja_b
                 st.success(f"🏆 Gana {ganador[0]}/{ganador[1]}")
                 st.rerun()
+# ==================================================================
+# 8b. VISTA PÚBLICA / SOLO LECTURA (MODO JUGADOR)
+# ==================================================================
+def _tabla_partidos_readonly(partidos):
+    filas = []
+    for p in partidos:
+        res = f"{p['sets_a']}-{p['sets_b']}" if p.get("sets_a") is not None else "Pendiente"
+        filas.append({
+            "Día": p.get("dia", "-"),
+            "Hora": p.get("hora", "-"),
+            "Pista": p.get("pista", "-"),
+            "Pareja A": f"{p['pareja_a'][0]}/{p['pareja_a'][1]}",
+            "Pareja B": f"{p['pareja_b'][0]}/{p['pareja_b'][1]}",
+            "Resultado": res
+        })
+    return pd.DataFrame(filas)
+def panel_vista_jugador():
+    if st.session_state.etapa == "config":
+        st.info("⏳ El torneo aún no ha sido generado por el organizador.")
+        return
+    pdf_bytes = obtener_pdf_cacheado()
+    st.download_button(
+        "📥 Descargar Cuadro y Horarios en PDF",
+        data=pdf_bytes,
+        file_name=f"cuadro_torneo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+    st.divider()
+    rondas = st.session_state.get("rondas_programadas", [])
+    if rondas:
+        st.subheader("📅 Calendario de Partidos")
+        tabs = st.tabs([f"Ronda {i}" for i in range(1, len(rondas) + 1)])
+        for i, (tab, ronda) in enumerate(zip(tabs, rondas), start=1):
+            with tab:
+                partidos = ronda.get("partidos", [])
+                if partidos:
+                    st.dataframe(_tabla_partidos_readonly(partidos), hide_index=True, use_container_width=True)
+                if ronda.get("descansan"):
+                    st.caption("😴 Descansa: " + ", ".join(ronda["descansan"]))
+    if st.session_state.get("clasificacion"):
+        st.subheader("📊 Clasificación")
+        st.dataframe(tabla_clasificacion(st.session_state.clasificacion), hide_index=True, use_container_width=True)
+    partidos_elim = st.session_state.get("partidos_ronda_actual", [])
+    if partidos_elim:
+        num_cuadro = len(st.session_state.get("cuadro_actual", []))
+        st.subheader(nombre_ronda(num_cuadro) if num_cuadro > 0 else "🎯 FASE ELIMINATORIA")
+        st.dataframe(_tabla_partidos_readonly(partidos_elim), hide_index=True, use_container_width=True)
+    if st.session_state.get("liguilla_partido"):
+        st.subheader("🏆 Gran Final")
+        st.dataframe(_tabla_partidos_readonly([st.session_state.liguilla_partido]), hide_index=True, use_container_width=True)
+    campeon = st.session_state.get("campeon") or st.session_state.get("liguilla_campeon")
+    if campeon:
+        st.balloons()
+        st.success(f"🏆🏆🏆 ¡CAMPEONES DEL TORNEO: {campeon[0]} y {campeon[1]}! 🏆🏆🏆")
 # ==================================================================
 # 9. PANELES DE COMPETICIÓN
 # ==================================================================
@@ -1086,41 +1143,60 @@ def panel_final():
 def main():
     if st.session_state.get("logo_torneo_bytes"):
         st.image(st.session_state.logo_torneo_bytes, width=100)
-    
+
     st.title("🎾 GeneradorPadel")
-    st.caption("Gestor Profesional de Torneos de Pádel · Cuadros, Horarios y Resultados")
-    with st.sidebar:
-        if st.session_state.etapa != "config":
-            st.info(f"Torneo en curso con {len(st.session_state.parejas)} parejas.")
-            if st.button("🔄 Reiniciar / Empezar de cero", use_container_width=True):
-                reiniciar_torneo()
-        st.divider()
-        st.subheader("💾 Guardar y Exportar")
-        if st.session_state.etapa != "config":
-            pdf_bytes = obtener_pdf_cacheado()
-            st.download_button(
-                "📥 Descargar Cuadro y Horarios en PDF",
-                data=pdf_bytes,
-                file_name=f"cuadro_torneo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-            st.download_button(
-                "💾 Guardar Copia del Torneo (.json)",
-                data=exportar_torneo(),
-                file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        archivo_torneo = st.file_uploader("📂 Cargar Torneo Guardado (.json)", type=["json"], key="cargador_torneo")
-        if archivo_torneo is not None:
-            if st.button("♻️ Restaurar torneo", use_container_width=True):
-                try:
-                    cargar_torneo(archivo_torneo.read().decode("utf-8"))
-                    st.success("✅ Torneo restaurado.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error al cargar: {e}")
+
+    if MODO_JUGADOR:
+        st.caption("👀 Vista pública del torneo — solo lectura")
+    else:
+        st.caption("Gestor Profesional de Torneos de Pádel · Cuadros, Horarios y Resultados")
+
+    if not MODO_JUGADOR:
+        with st.sidebar:
+            if st.session_state.etapa != "config":
+                st.info(f"Torneo en curso con {len(st.session_state.parejas)} parejas.")
+                if st.button("🔄 Reiniciar / Empezar de cero", use_container_width=True):
+                    reiniciar_torneo()
+
+                st.divider()
+                enlace_jugador = "?modo=jugador"
+
+                if st.button("📋 Copiar / Ver enlace para jugadores", use_container_width=True):
+                    st.session_state["_mostrar_enlace_jugador"] = True
+
+                if st.session_state.get("_mostrar_enlace_jugador"):
+                    st.code(enlace_jugador, language=None)
+                    st.caption("Añade `?modo=jugador` al final de la URL de tu app para compartir el modo solo lectura.")
+                    st.link_button("🔗 Abrir vista de jugador", enlace_jugador, use_container_width=True)
+
+            st.divider()
+            st.subheader("💾 Guardar y Exportar")
+            if st.session_state.etapa != "config":
+                pdf_bytes = obtener_pdf_cacheado()
+                st.download_button(
+                    "📥 Descargar Cuadro y Horarios en PDF",
+                    data=pdf_bytes,
+                    file_name=f"cuadro_torneo_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                st.download_button(
+                    "💾 Guardar Copia del Torneo (.json)",
+                    data=exportar_torneo(),
+                    file_name=f"torneo_padel_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+            archivo_torneo = st.file_uploader("📂 Cargar Torneo Guardado (.json)", type=["json"], key="cargador_torneo")
+            if archivo_torneo is not None:
+                if st.button("♻️ Restaurar torneo", use_container_width=True):
+                    try:
+                        cargar_torneo(archivo_torneo.read().decode("utf-8"))
+                        st.success("✅ Torneo restaurado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al cargar: {e}")
+
     etapas = [("config", "1️⃣ Configurar"), ("previa", "2️⃣ Previa / R1"), ("clasificacion", "3️⃣ Clasificación"), ("eliminatoria", "4️⃣ Eliminatorias"), ("final", "🏆 Campeón")]
     actual = st.session_state.etapa
     if actual == "liguilla_final": actual = "eliminatoria"
@@ -1128,6 +1204,11 @@ def main():
     st.progress((idx_map.get(actual, 0) + 1) / len(etapas))
     st.caption(" → ".join(f"**{txt}**" if k == actual else txt for k, txt in etapas))
     st.divider()
+
+    if MODO_JUGADOR:
+        panel_vista_jugador()
+        return
+
     if st.session_state.etapa == "config":
         panel_configuracion()
         st.info("👈 Configura las opciones en la barra lateral y pulsa **Generar torneo**.")
