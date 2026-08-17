@@ -706,19 +706,34 @@ def panel_configuracion():
     # partidos de la fase inicial, se bloquea la creación del
     # torneo en lugar de generarlo con partidos sin hueco.
     # ------------------------------------------------------------
-    partidos_previos_estimados = {
-        "Liguilla / Todos contra todos (Round Robin)": (num_parejas * (num_parejas - 1)) // 2,
-        "Eliminatoria Directa con Repesca (Todos juegan R1)": num_parejas // 2,
-    }.get(tipo_formato, math.ceil(num_parejas * 1.5))
+    # ------------------------------------------------------------
+    # Comprobación de capacidad horaria TOTAL (Previa + Fase Final)
+    # ------------------------------------------------------------
+    if tipo_formato == "Liguilla / Todos contra todos (Round Robin)":
+        partidos_previos_calc = (num_parejas * (num_parejas - 1)) // 2
+        partidos_fase_final_calc = 1
+        bracket_calc = 2
+    elif tipo_formato == "Eliminatoria Directa con Repesca (Todos juegan R1)":
+        bracket_calc = calcular_tamano_cuadro(num_parejas)
+        partidos_previos_calc = num_parejas // 2
+        partidos_fase_final_calc = bracket_calc - 1
+    else:  # Fase Previa + Eliminatoria
+        bracket_calc = calcular_tamano_cuadro(num_parejas)
+        partidos_previos_calc = math.ceil(num_parejas * 1.5)
+        partidos_fase_final_calc = bracket_calc - 1
+
+    partidos_totales_torneo = partidos_previos_calc + partidos_fase_final_calc
     capacidad_slots = calcular_capacidad(dias_ui, list(range(num_pistas)), duracion)
-    capacidad_insuficiente = capacidad_slots < partidos_previos_estimados
+    capacidad_insuficiente = capacidad_slots < partidos_totales_torneo
+
     if capacidad_insuficiente:
-        faltan = partidos_previos_estimados - capacidad_slots
+        faltan = partidos_totales_torneo - capacidad_slots
         st.sidebar.error(
-            f"🚫 No caben todos los partidos: con tus pistas y franjas horarias hay hueco para "
-            f"~{capacidad_slots} partido(s), pero la fase inicial necesita aproximadamente "
-            f"{partidos_previos_estimados} (faltan {faltan}). "
-            "Añade más pistas, más franjas horarias, o reduce el número de parejas antes de generar el torneo."
+            f"🚫 **Horarios insuficientes para el torneo completo:**\n\n"
+            f"- **Capacidad total:** ~{capacidad_slots} partidos.\n"
+            f"- **Partidos necesarios:** {partidos_totales_torneo} ({partidos_previos_calc} en fase inicial + {partidos_fase_final_calc} en fase final).\n"
+            f"- **Faltan:** {faltan} hueco(s).\n\n"
+            "Añade más pistas o franjas horarias antes de generar el torneo."
         )
     st.sidebar.divider()
     acceso_pro = st.session_state.get("acceso_pro", False)
